@@ -341,7 +341,7 @@ class EggVertexPool:
         if type.upper() != 'VERTEX':
             assert False
 
-        return EggVertex((parse_number(v) for v in values))
+        return EggVertex(tuple(parse_number(v) for v in values))
 
     def end_child(self, context, type, name, vertex):
         verts = self._vertices
