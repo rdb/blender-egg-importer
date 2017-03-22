@@ -200,12 +200,12 @@ class EggTexture:
                 path = path.replace('/', '\\')
                 path = path[1].upper() + ':' + path[2:]
 
-        path = path.replace('/', '\\')
+        path = path.replace('/', os.sep)
 
         # If it's a relative path, search in the location of the .egg first.
         if not os.path.isabs(path) and self.search_dir and os.path.exists(os.path.join(self.search_dir, path)):
             path = os.path.join(self.search_dir, path)
-            path = path.replace('\\.\\', '\\')
+            path = path.replace(os.sep + '.' + os.sep, os.sep)
             self.texture.image = bpy.data.images.load(path)
             #self.texture.image.filepath = path
         else:
