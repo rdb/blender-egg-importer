@@ -89,6 +89,37 @@ class EggContext:
         if self.duplicate_faces > 0:
             self.warn("Ignored {} duplicate faces".format(self.duplicate_faces))
 
+    def load_image(self, path):
+        """ Loads an image from disk as Blender image. """
+
+        if sys.platform == 'win32':
+            # Convert an absolute Panda-style path to a Windows path.
+            if len(path) > 3 and path[0] == '/' and path[2] == '/':
+                path = path.replace('/', '\\')
+                path = path[1].upper() + ':' + path[2:]
+
+        path = path.replace('/', os.sep)
+
+        # If it's a relative path, search in the location of the .egg first.
+        if not os.path.isabs(path) and self.search_dir and os.path.exists(os.path.join(self.search_dir, path)):
+            path = os.path.join(self.search_dir, path)
+            path = path.replace(os.sep + '.' + os.sep, os.sep)
+            image = bpy.data.images.load(path)
+            #image.filepath = path
+        else:
+            # Try loading it with the original path, just in case.
+            try:
+                image = bpy.data.images.load(path)
+            except RuntimeError:
+                # That failed, of course.  OK, create a new image with this
+                # filename, and issue an error.
+                image = bpy.data.images.new(os.path.basename(path), 1, 1)
+                image.source = 'FILE'
+                image.filepath = path
+                self.error("Unable to find texture {}".format(path))
+
+        return image
+
 
 class EggRenderMode:
     """ Accumulates render state attributes. """
@@ -258,31 +289,12 @@ class EggMaterial:
 
 
 class EggTexture:
-    def __init__(self, name, path, search_dir=None):
+    def __init__(self, name, image):
         self.texture = bpy.data.textures.new(name, 'IMAGE')
-        self.search_dir = search_dir
+        self.texture.image = image
         self.envtype = 'modulate'
         self.uv_name = None
         self.matrix = None
-
-        if sys.platform == 'win32':
-            # Convert an absolute Panda-style path to a Windows path.
-            if len(path) > 3 and path[0] == '/' and path[2] == '/':
-                path = path.replace('/', '\\')
-                path = path[1].upper() + ':' + path[2:]
-
-        path = path.replace('/', os.sep)
-
-        # If it's a relative path, search in the location of the .egg first.
-        if not os.path.isabs(path) and self.search_dir and os.path.exists(os.path.join(self.search_dir, path)):
-            path = os.path.join(self.search_dir, path)
-            path = path.replace(os.sep + '.' + os.sep, os.sep)
-            self.texture.image = bpy.data.images.load(path)
-            #self.texture.image.filepath = path
-        else:
-            # Just load it with the original path.  If it fails, let the user
-            # deal with the failure.
-            self.texture.image = bpy.data.images.load(path)
 
     def begin_child(self, context, type, name, values):
         type = type.upper()
@@ -477,7 +489,7 @@ class EggGroupNode:
             assert len(values) == 1
             context.set_coordinate_system(values[0])
         elif type == 'TEXTURE':
-            tex = EggTexture(name, values[0], search_dir=context.search_dir)
+            tex = EggTexture(name, context.load_image(values[0]))
             context.textures[name] = tex
             return tex
         elif type == 'MATERIAL':
