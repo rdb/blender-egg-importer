@@ -4,7 +4,7 @@ out the appropriate Blender structures. """
 from .eggparser import parse_number
 
 import sys, os
-import bpy, bmesh
+import bpy
 from mathutils import Matrix, Vector
 from math import radians
 
@@ -37,6 +37,11 @@ class EggContext:
         self.coord_system = None
         self.cs_matrix = self.y_to_z_up_mat
         self.inv_cs_matrix = self.y_to_z_up_mat.inverted()
+
+    def info(self, message):
+        """ Called when the importer wants to report something.  This can be
+        overridden to do something useful, such as report to the user. """
+        pass
 
     def warn(self, message):
         """ Called when the importer wants to warn about something.  This can
@@ -299,6 +304,8 @@ class EggTexture:
         self.envtype = 'modulate'
         self.uv_name = None
         self.matrix = None
+        self.priority = 0
+        self.warned_vpools = set()
 
     def begin_child(self, context, type, name, values):
         type = type.upper()
@@ -330,6 +337,9 @@ class EggTexture:
 
             elif name == 'uv_name' or name == 'uv-name':
                 self.uv_name = values[0]
+
+            elif name == 'priority':
+                self.priority = int(values[0])
 
         elif type == 'TRANSFORM':
             return EggTransform()
@@ -398,14 +408,14 @@ class EggVertex:
 
     def __init__(self, pos):
         self.pos = pos
-        self.normal = (0, 0, 0)
+        self.normal = None
         self.uv_map = {}
         self.aux_map = {}
         self.dxyzs = {}
 
     def begin_child(self, context, type, name, values):
         if type.upper() == 'NORMAL':
-            self.normal = [parse_number(v) for v in values]
+            self.normal = tuple(parse_number(v) for v in values)
 
         elif type.upper() == 'RGBA':
             self.color = [parse_number(v) for v in values]
@@ -422,7 +432,12 @@ class EggVertexPool:
         self._vertices = []
 
     def __getitem__(self, index):
-        return self._vertices[index]
+        if index < 0:
+            raise IndexError
+        vertex = self._vertices[index]
+        if not vertex:
+            raise IndexError
+        return vertex
 
     def begin_child(self, context, type, name, values):
         if type.upper() != 'VERTEX':
@@ -438,8 +453,7 @@ class EggVertexPool:
             index = int(name)
             if index < num_vertices:
                 assert verts[index] is None
-                vertex = EggVertex()
-                self._vertices[index] = vertex
+                verts[index] = vertex
             else:
                 if index != num_vertices:
                     verts.extend([None] * (index - num_vertices))
@@ -551,18 +565,27 @@ class EggGroup(EggGroupNode):
         self.vertices = {}
 
         self.matrix = None
-        self.bmesh = None
+        self.mesh = None
+        self.first_vertex = 0
+        self.normals = []
+        self.have_normals = False
         self.materials = []
         self.dart = False
 
     def get_bvert(self, vert):
-        if vert in self.vertices:
-            return self.vertices[vert]
+        # Vertices are keyed by position only, since normals and UVs are
+        # defined per-loop.
+        key = vert.pos
+        vertices = self.vertices
+        if key in vertices:
+            return vertices[key]
 
-        bvert = self.bmesh.verts.new(vert.pos)
-        bvert.normal = vert.normal
-        self.vertices[vert] = bvert
-        return bvert
+        index = len(self.mesh.vertices)
+        self.mesh.vertices.add(1)
+        bvert = self.mesh.vertices[index]
+        bvert.co = key
+        vertices[key] = index
+        return index
 
     def begin_child(self, context, type, name, values):
         type = type.upper()
@@ -602,44 +625,70 @@ class EggGroup(EggGroupNode):
                 self.matrix = child.matrix
 
         elif isinstance(child, EggPrimitive):
-            if self.bmesh is None:
-                self.bmesh = bmesh.new()
-                self.tex_layer = self.bmesh.faces.layers.tex.verify()
             vpool = context.vertex_pools[child.pool]
 
-            # Check the indices for duplicates, or Blender will freak out.
-            verts = []
-            uvs = []
-            last = child.indices[-1]
-            for index in child.indices:
-                if index != last:
-                    vert = vpool[index]
-                    verts.append(self.get_bvert(vert))
-                    uvs.append(vert.uv_map.get('UVMap'))
-                    last = index
+            if self.mesh is None:
+                self.mesh = bpy.data.meshes.new(self.name)
 
-            if len(verts) < 3:
-                context.degenerate_faces += 1
-                return EggGroupNode.end_child(self, context, type, name, child)
+            if child.normal:
+                self.have_normals = True
+            poly_normal = child.normal or (0, 0, 0)
 
-            try:
-                face = self.bmesh.faces.new(verts)
-            except ValueError:
-                #FIXME: better way to handle duplicate faces.
-                context.duplicate_faces += 1
-                return EggGroupNode.end_child(self, context, type, name, child)
+            # Create the loops.  A loop is an occurrence of a vertex in a
+            # polygon.
+            mesh = self.mesh
+            loops = mesh.loops
+            loop_offset = len(loops)
+            loops.add(len(child.indices))
+            for index, loop in zip(child.indices, loops[loop_offset:]):
+                try:
+                    vertex = vpool[index]
+                except IndexError:
+                    context.error("Primitive references index {}, which is not defined in vertex pool '{}'".format(index, child.pool))
+                    # Skip the face.  This will leave some unused loops, but
+                    # they will be cleaned up by validate().
+                    return EggGroupNode.end_child(self, context, type, name, child)
 
-            # (Arbitrarily) assign the first texture as UV image.
-            if child.textures:
-                face[self.tex_layer].image = child.textures[0].texture.image
+                loop.vertex_index = self.get_bvert(vertex)
 
-            # Assign UVs.
-            if uvs.count(None) < len(uvs):
-                uv_layer = self.bmesh.loops.layers.uv.verify()
-                for i, loop in enumerate(face.loops):
-                    assert verts[i] == loop.vert
-                    if uvs[i]:
-                        loop[uv_layer].uv = uvs[i][:2]
+                vertex_normal = vertex.normal
+                if vertex_normal:
+                    self.have_normals = True
+                    self.normals.append(vertex_normal or poly_normal)
+                else:
+                    self.normals.append(vertex_normal or poly_normal)
+
+                for name, uv in vertex.uv_map.items():
+                    if name not in mesh.uv_layers:
+                        mesh.uv_textures.new(name)
+                    mesh.uv_layers[name].data[loop.index].uv = uv
+
+            # Create a polygon referencing those loops.
+            poly_index = len(mesh.polygons)
+            mesh.polygons.add(1)
+            poly = mesh.polygons[poly_index]
+            poly.loop_start = loop_offset
+            poly.loop_total = len(child.indices)
+
+            # Assign the highest priority texture that uses a given UV set to
+            # the UV texture.  If there are multiple textures with the same
+            # priority, use the first one.
+            set_textures = {}
+            for texture in child.textures:
+                uv_name = texture.uv_name or DEFAULT_UV_NAME
+                try:
+                    uv_texture = mesh.uv_textures[uv_name]
+                except KeyError:
+                    # Display a warning.  Since this will probably be the case
+                    # for every polygon in this mesh, display it only once.
+                    if child.pool not in texture.warned_vpools:
+                        texture.warned_vpools.add(child.pool)
+                        context.warn("Texture {} references UV set {} which is not present on any vertex in {}".format(texture.texture.name, texture.uv_name, self.name))
+                    continue
+
+                if uv_name not in set_textures or texture.priority > set_textures[uv_name].priority:
+                    set_textures[uv_name] = texture
+                    uv_texture.data[poly_index].image = texture.texture.image
 
             # Check if we already have a material for this combination.
             bmat = child.material.get_material(child.textures, child.color, child.bface, child.alpha)
@@ -648,7 +697,8 @@ class EggGroup(EggGroupNode):
             else:
                 index = len(self.materials)
                 self.materials.append(bmat)
-            face.material_index = index
+                mesh.materials.append(bmat)
+            poly.material_index = index
 
         return EggGroupNode.end_child(self, context, type, name, child)
 
@@ -658,12 +708,14 @@ class EggGroup(EggGroupNode):
         know the parent-child hierarchy and transforms. """
 
         data = None
-        if self.bmesh:
-            data = bpy.data.meshes.new(self.name)
-            for mat in self.materials:
-                data.materials.append(mat)
-            self.bmesh.to_mesh(data)
-            self.bmesh = None
+        if self.mesh:
+            data = self.mesh
+            data.update(calc_edges=True, calc_tessface=True)
+            if self.have_normals:
+                data.normals_split_custom_set(self.normals)
+                data.use_auto_smooth = True
+            if data.validate(verbose=True):
+                context.info("Corrected invalid geometry in mesh '{}'.".format(data.name))
 
         elif self.dart:
             data = bpy.data.armatures.new(self.name)
@@ -686,6 +738,8 @@ class EggGroup(EggGroupNode):
         if inv_matrix and object.type == 'MESH':
             object.data.transform(inv_matrix)
 
+        # Place it in the scene.  We need to do this before assigning game
+        # properties, below.
         bpy.context.scene.objects.link(object)
 
         # Awkward, but it seems there's no other way to set a game property

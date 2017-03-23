@@ -22,6 +22,8 @@ Supported features:
 - Collide and ObjectType (as game properties)
 - Collision masks (as game properties)
 - Coordinate system conversion
+- Custom normals
+- Multiple UV coordinate sets
 
 Yet to do:
 - Improve performance of parser
@@ -29,3 +31,4 @@ Yet to do:
 - NURBS surfaces and curves
 - Morph targets
 - Animations
+- Vertex colors

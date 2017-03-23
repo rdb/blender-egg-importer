@@ -2,7 +2,7 @@ bl_info = {
     "name": "Import Panda3D .egg models",
     "author": "rdb",
     "version": (0, 1),
-    "blender": (2, 57, 0),
+    "blender": (2, 74, 0), # Needed for normals_split_custom_set
     "location": "File > Import > Panda3D (.egg)",
     "description": "",
     "warning": "",
@@ -49,6 +49,7 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
             fp = io.StringIO(data)
 
             context = importer.EggContext()
+            context.info = lambda msg: self.report({'INFO'}, msg)
             context.warn = lambda msg: self.report({'WARNING'}, msg)
             context.error = lambda msg: self.report({'ERROR'}, msg)
             context.search_dir = self.directory
