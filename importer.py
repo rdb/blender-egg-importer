@@ -31,6 +31,7 @@ class EggContext:
         self.search_dir = None
 
         self.duplicate_faces = 0
+        self.degenerate_faces = 0
 
         # For presumably historical reasons, .egg defaults to Y-Up-Right.
         self.coord_system = None
@@ -87,7 +88,10 @@ class EggContext:
         duplicate faces.  Called after importing is done. """
 
         if self.duplicate_faces > 0:
-            self.warn("Ignored {} duplicate faces".format(self.duplicate_faces))
+            self.warn("Removed {} duplicate faces".format(self.duplicate_faces))
+
+        if self.degenerate_faces > 0:
+            self.warn("Removed {} degenerate faces".format(self.degenerate_faces))
 
     def load_image(self, path):
         """ Loads an image from disk as Blender image. """
@@ -613,6 +617,10 @@ class EggGroup(EggGroupNode):
                     verts.append(self.get_bvert(vert))
                     uvs.append(vert.uv_map.get('UVMap'))
                     last = index
+
+            if len(verts) < 3:
+                context.degenerate_faces += 1
+                return EggGroupNode.end_child(self, context, type, name, child)
 
             try:
                 face = self.bmesh.faces.new(verts)
