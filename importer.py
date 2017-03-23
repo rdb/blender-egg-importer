@@ -12,11 +12,82 @@ DEFAULT_UV_NAME = "UVMap"
 
 
 class EggContext:
+
+    # These matrices are used for coordinate system conversion.
+    y_to_z_up_mat = Matrix(((1.0, 0.0, 0.0, 0.0),
+                            (0.0, 0.0, 1.0, 0.0),
+                            (0.0,-1.0, 0.0, 0.0),
+                            (0.0, 0.0, 0.0, 1.0)))
+
+    flip_y_mat = Matrix(((1.0, 0.0, 0.0, 0.0),
+                         (0.0,-1.0, 0.0, 0.0),
+                         (0.0, 0.0, 1.0, 0.0),
+                         (0.0, 0.0, 0.0, 1.0)))
+
     def __init__(self):
         self.vertex_pools = {}
         self.materials = {}
         self.textures = {}
         self.search_dir = None
+
+        self.duplicate_faces = 0
+
+        # For presumably historical reasons, .egg defaults to Y-Up-Right.
+        self.coord_system = None
+        self.cs_matrix = self.y_to_z_up_mat
+        self.inv_cs_matrix = self.y_to_z_up_mat.inverted()
+
+    def warn(self, message):
+        """ Called when the importer wants to warn about something.  This can
+        be overridden to do something useful, such as report to the user. """
+        pass
+
+    def error(self, message):
+        """ Called when the importer wants to error about something.  This can
+        be overridden to do something useful, such as report to the user. """
+        pass
+
+    def set_coordinate_system(self, coordsys):
+        """ Called when a <CoordinateSystem> entry is encountered in the .egg
+        file.  This can occur anywhere in the .egg file, but there may not be
+        two mismatching entries. """
+
+        # Canonicalise coordinate system value.
+        canonical = coordsys.strip().upper().replace('-', '').replace('_', '').replace('RIGHT', '')
+
+        if canonical == 'ZUP':
+            self.cs_matrix = Matrix.Identity(4)
+        elif canonical == 'YUP':
+            self.cs_matrix = self.y_to_z_up_mat
+        elif canonical == 'ZUPLEFT':
+            self.cs_matrix = self.flip_y_mat
+        elif canonical == 'YUPLEFT':
+            self.cs_matrix = self.y_to_z_up_mat * self.flip_y_mat
+        else:
+            self.error("Invalid coordinate system '{}' in .egg file.".format(coordsys))
+            return
+
+        if self.coord_system is not None and self.coord_system != coordsys:
+            self.error("Mismatching <CoordinateSystem> tags in .egg file.")
+            return
+
+        self.inv_cs_matrix = self.cs_matrix.inverted()
+
+    def transform_matrix(self, matrix):
+        """ Transforms the given matrix from the egg file's coordinate system
+        into the Z-Up-Right coordinate system. """
+
+        if self.coord_system == 'ZUP':
+            return matrix
+        else:
+            return self.inv_cs_matrix * matrix * self.cs_matrix
+
+    def final_report(self):
+        """ Makes error messages about things that are tallied up, such as
+        duplicate faces.  Called after importing is done. """
+
+        if self.duplicate_faces > 0:
+            self.warn("Ignored {} duplicate faces".format(self.duplicate_faces))
 
 
 class EggRenderMode:
@@ -403,7 +474,8 @@ class EggGroupNode:
         type = type.upper()
 
         if type == 'COORDINATESYSTEM':
-            pass
+            assert len(values) == 1
+            context.set_coordinate_system(values[0])
         elif type == 'TEXTURE':
             tex = EggTexture(name, values[0], search_dir=context.search_dir)
             context.textures[name] = tex
@@ -445,9 +517,9 @@ class EggGroupNode:
         if isinstance(child, EggGroupNode):
             self.children.append(child)
 
-    def build_tree(self, parent=None, inv_matrix=None):
+    def build_tree(self, context, parent=None, inv_matrix=None):
         for child in self.children:
-            child.build_tree(parent)
+            child.build_tree(context, parent, inv_matrix)
 
     def build_armature(self, *args, **kwargs):
         for child in self.children:
@@ -530,7 +602,12 @@ class EggGroup(EggGroupNode):
                     uvs.append(vert.uv_map.get('UVMap'))
                     last = index
 
-            face = self.bmesh.faces.new(verts)
+            try:
+                face = self.bmesh.faces.new(verts)
+            except ValueError:
+                #FIXME: better way to handle duplicate faces.
+                context.duplicate_faces += 1
+                return EggGroupNode.end_child(self, context, type, name, child)
 
             # (Arbitrarily) assign the first texture as UV image.
             if child.textures:
@@ -555,7 +632,7 @@ class EggGroup(EggGroupNode):
 
         return EggGroupNode.end_child(self, context, type, name, child)
 
-    def build_tree(self, parent, inv_matrix=None):
+    def build_tree(self, context, parent, inv_matrix=None):
         """ Walks the hierarchy of groups and builds the Blender object graph.
         This needs to happen after adding all the children so that we fully
         know the parent-child hierarchy and transforms. """
@@ -574,12 +651,15 @@ class EggGroup(EggGroupNode):
         object = bpy.data.objects.new(self.name, data)
         object.parent = parent
 
+        if not inv_matrix:
+            inv_matrix = context.inv_cs_matrix
+
         if self.matrix:
-            object.matrix_basis = self.matrix
-            if inv_matrix:
-                inv_matrix = self.matrix.inverted() * inv_matrix
-            else:
-                inv_matrix = self.matrix.inverted()
+            # Adjust the matrix to be consistent with the coordinate system.
+            matrix = context.transform_matrix(self.matrix)
+            object.matrix_basis = matrix
+
+            inv_matrix = matrix.inverted() * inv_matrix
 
         # The .egg format specifies vertex data in global space, so we have to
         # transform the object by its inverse matrix to compensate for that.
@@ -600,20 +680,20 @@ class EggGroup(EggGroupNode):
             if self.dart:
                 #bpy.context.scene.update()
                 bpy.ops.object.mode_set(mode='EDIT')
-                self.build_armature(data, None, Matrix())
+                self.build_armature(context, data, None, Matrix())
                 bpy.ops.object.mode_set(mode='OBJECT')
 
             bpy.context.scene.objects.active = active
 
         for child in self.children:
-            child.build_tree(object, inv_matrix)
+            child.build_tree(context, object, inv_matrix)
 
         return object
 
 
 class EggJoint(EggGroup):
-    def build_armature(self, armature, parent, matrix):
-        matrix *= self.matrix
+    def build_armature(self, context, armature, parent, matrix):
+        matrix *= context.transform_matrix(self.matrix)
 
         bone = armature.edit_bones.new(self.name)
         bone.parent = parent
@@ -621,4 +701,4 @@ class EggJoint(EggGroup):
         bone.matrix = matrix
         bone.use_connect = True
 
-        EggGroupNode.build_armature(self, armature, bone, matrix)
+        EggGroupNode.build_armature(self, context, armature, bone, matrix)

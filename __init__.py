@@ -49,11 +49,14 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
             fp = io.StringIO(data)
 
             context = importer.EggContext()
+            context.warn = lambda msg: self.report({'WARNING'}, msg)
+            context.error = lambda msg: self.report({'ERROR'}, msg)
             context.search_dir = self.directory
             root = importer.EggGroupNode()
             eggparser.parse_egg(fp, root, context)
-            root.build_tree()
+            root.build_tree(context)
             fp.close()
+            context.final_report()
         return {'FINISHED'}
 
     def invoke(self, context, event):

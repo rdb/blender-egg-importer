@@ -21,9 +21,9 @@ Supported features:
 - Tags (as game properties)
 - Collide and ObjectType (as game properties)
 - Collision masks (as game properties)
+- Coordinate system conversion
 
 Yet to do:
-- Coordinate system conversion
 - Improve performance of parser
 - Triangle fans, strips, and lines
 - NURBS surfaces and curves
