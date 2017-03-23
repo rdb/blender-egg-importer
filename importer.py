@@ -287,11 +287,19 @@ class EggMaterial:
             if texture.envtype == 'modulate':
                 slot.use_map_color_diffuse = True
             elif texture.envtype == 'normal':
+                slot.use_map_color_diffuse = False
                 slot.use_map_normal = True
             elif texture.envtype == 'glow':
+                slot.use_map_color_diffuse = True
                 slot.use_map_emit = True
             elif texture.envtype == 'gloss':
+                slot.use_map_color_diffuse = True
                 slot.use_map_specular = True
+
+            # Should probably be more sophisticated; right now this is to
+            # support what YABEE generates.
+            if texture.blend == 'add' and not alpha:
+                bmat.game_settings.alpha_blend = 'ADD'
 
         self.materials[key] = bmat
         return bmat
@@ -305,6 +313,7 @@ class EggTexture:
         self.uv_name = None
         self.matrix = None
         self.priority = 0
+        self.blend = None
         self.warned_vpools = set()
 
     def begin_child(self, context, type, name, values):
@@ -334,6 +343,9 @@ class EggTexture:
             elif name == 'alpha':
                 if values[0].lower() == 'premultiplied':
                     self.texture.image.alpha_mode = 'PREMUL'
+
+            elif name == 'blend':
+                self.blend = values[0].lower()
 
             elif name == 'uv_name' or name == 'uv-name':
                 self.uv_name = values[0]
