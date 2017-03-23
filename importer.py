@@ -735,6 +735,14 @@ class EggGroup(EggGroupNode):
         object = bpy.data.objects.new(self.name, data)
         object.parent = parent
 
+        # Let the user know if we couldn't get the name we want.
+        if object.name != self.name:
+            context.warn("'{}' was renamed to '{}' due to a name conflict".format(self.name, object.name))
+
+        if data and data.name != self.name:
+            if data.name != object.name:
+                context.warn("'{}' was renamed to '{}' due to a name conflict".format(self.name, data.name))
+
         if not inv_matrix:
             inv_matrix = context.inv_cs_matrix
 
