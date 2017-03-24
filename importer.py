@@ -38,6 +38,10 @@ class EggContext:
         self.cs_matrix = self.y_to_z_up_mat
         self.inv_cs_matrix = self.y_to_z_up_mat.inverted()
 
+        # We remember all the Group/VertexRef entries, so we can assign them
+        # in a separate pass.
+        self.group_vertex_refs = []
+
     def info(self, message):
         """ Called when the importer wants to report something.  This can be
         overridden to do something useful, such as report to the user. """
@@ -128,6 +132,28 @@ class EggContext:
                 self.error("Unable to find texture {}".format(path))
 
         return image
+
+    def assign_vertex_groups(self):
+        """ Called at the end, to assign all of the vertex groups. """
+
+        for name, vertex_ref in self.group_vertex_refs:
+            vpool = self.vertex_pools[vertex_ref.pool]
+            for group in vpool.groups:
+                vertex_groups = group.object.vertex_groups
+                if name in vertex_groups:
+                    vertex_group = vertex_groups[name]
+                else:
+                    vertex_group = vertex_groups.new(name)
+
+                # Remap the indices to this object.
+                indices = set()
+                for index in vertex_ref.indices:
+                    vertex = vpool[index]
+                    if vertex.pos in group.vertices:
+                        indices.add(group.vertices[vertex.pos])
+
+                if indices:
+                    vertex_group.add(tuple(indices), vertex_ref.membership, 'ADD')
 
 
 class EggRenderMode:
@@ -442,6 +468,7 @@ class EggVertex:
 class EggVertexPool:
     def __init__(self):
         self._vertices = []
+        self.groups = set()
 
     def __getitem__(self, index):
         if index < 0:
@@ -564,6 +591,9 @@ class EggGroupNode:
             child.build_tree(context, parent, inv_matrix)
 
     def build_armature(self, *args, **kwargs):
+        """ Recursively builds up an armature under a group with dart tag.
+        This requires the armature to be active and in edit mode. """
+
         for child in self.children:
             child.build_armature(*args, **kwargs)
 
@@ -583,6 +613,9 @@ class EggGroup(EggGroupNode):
         self.have_normals = False
         self.materials = []
         self.dart = False
+
+        # Keep track of whether there is any geometry below this node.
+        self.any_geometry_below = False
 
     def get_bvert(self, vert):
         # Vertices are keyed by position only, since normals and UVs are
@@ -622,6 +655,11 @@ class EggGroup(EggGroupNode):
         elif type == 'TRANSFORM':
             return EggTransform()
 
+        elif type == 'VERTEXREF':
+            vertex_ref = EggGroupVertexRef([int(v) for v in values])
+            context.group_vertex_refs.append((self.name, vertex_ref))
+            return vertex_ref
+
         elif type == 'DART':
             # This indicates the root of an animated model.
             # Do we need to consider other dart types?
@@ -637,7 +675,10 @@ class EggGroup(EggGroupNode):
                 self.matrix = child.matrix
 
         elif isinstance(child, EggPrimitive):
+            self.any_geometry_below = True
+
             vpool = context.vertex_pools[child.pool]
+            vpool.groups.add(self)
 
             if self.mesh is None:
                 self.mesh = bpy.data.meshes.new(self.name)
@@ -712,6 +753,9 @@ class EggGroup(EggGroupNode):
                 mesh.materials.append(bmat)
             poly.material_index = index
 
+        elif isinstance(child, EggGroup):
+            self.any_geometry_below |= child.any_geometry_below
+
         return EggGroupNode.end_child(self, context, type, name, child)
 
     def build_tree(self, context, parent, inv_matrix=None):
@@ -734,6 +778,7 @@ class EggGroup(EggGroupNode):
 
         object = bpy.data.objects.new(self.name, data)
         object.parent = parent
+        self.object = object
 
         # Let the user know if we couldn't get the name we want.
         if object.name != self.name:
@@ -762,6 +807,10 @@ class EggGroup(EggGroupNode):
         # properties, below.
         bpy.context.scene.objects.link(object)
 
+        # Recurse.
+        for child in self.children:
+            child.build_tree(context, object, inv_matrix)
+
         # Awkward, but it seems there's no other way to set a game property
         # or create bones.
         if self.properties or self.dart:
@@ -774,25 +823,125 @@ class EggGroup(EggGroupNode):
             if self.dart:
                 #bpy.context.scene.update()
                 bpy.ops.object.mode_set(mode='EDIT')
-                self.build_armature(context, data, None, Matrix())
+                self.build_armature(context, object, None, Matrix())
                 bpy.ops.object.mode_set(mode='OBJECT')
 
             bpy.context.scene.objects.active = active
 
-        for child in self.children:
-            child.build_tree(context, object, inv_matrix)
-
         return object
+
+    def build_armature(self, context, armature, parent, matrix):
+        """ Recursively builds up an armature under a group with dart tag.
+        This requires the armature to be active and in edit mode. """
+
+        if self.mesh:
+            # Add an armature modifier.
+            mod = self.object.modifiers.new(armature.data.name, 'ARMATURE')
+            mod.object = armature
+
+        EggGroupNode.build_armature(self, context, armature, parent, matrix)
 
 
 class EggJoint(EggGroup):
-    def build_armature(self, context, armature, parent, matrix):
-        matrix *= context.transform_matrix(self.matrix)
+    def build_tree(self, context, parent, inv_matrix=None):
+        # We don't export joints unless they have geometry below them.
+        if self.any_geometry_below:
+            EggGroup.build_tree(self, context, parent, inv_matrix)
 
-        bone = armature.edit_bones.new(self.name)
+    def build_armature(self, context, armature, parent, matrix):
+        """ Recursively builds up an armature under a group with dart tag.
+        This requires the armature to be active and in edit mode. """
+
+        if self.matrix:
+            matrix *= context.transform_matrix(self.matrix)
+
+        # Blender has a concept of "bone length", but Panda does not.  This
+        # means we have to guess the bone length if we want sightly armatures.
+
+        bone = armature.data.edit_bones.new(self.name)
         bone.parent = parent
         bone.tail = Vector((0, 1, 0))
         bone.matrix = matrix
-        bone.use_connect = True
 
-        EggGroupNode.build_armature(self, context, armature, bone, matrix)
+        # Find the closest child that lies directly along the length of this
+        # bone.  That child's head becomes this bone's tail.
+        # We only consider direct children; we assume that if there's an
+        # intervening <Group>, the bones were meant to be disconnected.
+        bone_dir = bone.tail - bone.head
+        bone_dir.normalize()
+        connect_child = None
+        connect_child_dist = None
+        average_head = Vector((0, 0, 0))
+        num_direct_children = 0
+
+        for child in self.children:
+            # Recurse.  It will return a bone if the child is an EggJoint.
+            child_bone = child.build_armature(context, armature, bone, matrix)
+            if child_bone:
+                average_head += child_bone.head
+                num_direct_children += 1
+
+                vec = child_bone.head - bone.head
+                if bone_dir.dot(vec.normalized()) >= 0.99999:
+                    # Yes, it lies along the length.
+                    dist = bone_dir.dot(vec)
+                    if connect_child_dist is None or dist < connect_child_dist:
+                        connect_child = child_bone
+                        connect_child_dist = dist
+
+        if connect_child:
+            # Yes, there is a child directly along the bone's axis.
+            bone.tail = connect_child.head
+            connect_child.use_connect = True
+        elif num_direct_children > 0:
+            # No, use the average of the bone's children.
+            bone.tail = average_head * (1.0 / num_direct_children)
+        else:
+            # An extremity.  Um, why not check whether *any* bone starts on
+            # this bone's axis, and use that as length, because that happens
+            # to work perfectly for my test model.
+            # Ideally this would check all bones, not just bones already
+            # visited, but that would require overhauling the traversal order.
+            connect = None
+            connect_dist = None
+            for other_bone in armature.data.edit_bones:
+                vec = other_bone.head - bone.head
+                if bone != other_bone and bone_dir.dot(vec.normalized()) >= 0.99999:
+                    # Yes, it lies along the length.
+                    dist = bone_dir.dot(vec)
+                    if dist > 0.001 and (connect_dist is None or dist < connect_dist):
+                        connect = other_bone
+                        connect_dist = dist
+            if connect:
+                bone.tail = connect.head
+            elif parent:
+                # Otherwise, inherit the length from the distance to the
+                # parent bone.  This is a guess, but not such a bad one.
+                bone.length = (bone.head - parent.head).length
+
+        # Connect all the bone's children that match up well.
+        for child in bone.children:
+            if (bone.tail - child.head).length_squared < 0.0001:
+                child.use_connect = True
+
+        return bone
+
+
+class EggGroupVertexRef:
+
+    __slots__ = 'indices', 'membership', 'pool'
+
+    def __init__(self, indices):
+        self.indices = indices
+        self.membership = 1.0
+
+    def begin_child(self, context, type, name, values):
+        if type.upper() in ('SCALAR', 'CHAR*'):
+            name = name.lower()
+            value = parse_number(values[0])
+
+            if name == 'membership':
+                self.membership = value
+
+        elif type.upper() == 'REF':
+            self.pool = values[0]

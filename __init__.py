@@ -55,8 +55,9 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
             context.search_dir = self.directory
             root = importer.EggGroupNode()
             eggparser.parse_egg(fp, root, context)
-            root.build_tree(context)
             fp.close()
+            root.build_tree(context)
+            context.assign_vertex_groups()
             context.final_report()
         return {'FINISHED'}
 
