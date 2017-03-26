@@ -35,12 +35,17 @@ class EggContext:
 
         # For presumably historical reasons, .egg defaults to Y-Up-Right.
         self.coord_system = None
+        self.up_vector = Vector((0, 0, 0))
+        self.right_vector = Vector((1, 0, 0))
+        self.forward_vector = Vector((0, 0, 0))
         self.cs_matrix = self.y_to_z_up_mat
         self.inv_cs_matrix = self.y_to_z_up_mat.inverted()
 
         # We remember all the Group/VertexRef entries, so we can assign them
         # in a separate pass.
         self.group_vertex_refs = []
+
+        self.joints = {}
 
     def info(self, message):
         """ Called when the importer wants to report something.  This can be
@@ -67,12 +72,20 @@ class EggContext:
 
         if canonical == 'ZUP':
             self.cs_matrix = Matrix.Identity(4)
+            self.up_vector = Vector((0, 0, 1))
+            self.forward_vector = Vector((0, 1, 0))
         elif canonical == 'YUP':
             self.cs_matrix = self.y_to_z_up_mat
+            self.up_vector = Vector((0, 1, 0))
+            self.forward_vector = Vector((0, 0, -1))
         elif canonical == 'ZUPLEFT':
             self.cs_matrix = self.flip_y_mat
+            self.up_vector = Vector((0, 0, 1))
+            self.forward_vector = Vector((0, -1, 0))
         elif canonical == 'YUPLEFT':
             self.cs_matrix = self.y_to_z_up_mat * self.flip_y_mat
+            self.up_vector = Vector((0, 1, 0))
+            self.forward_vector = Vector((0, 0, 1))
         else:
             self.error("Invalid coordinate system '{}' in .egg file.".format(coordsys))
             return
@@ -82,6 +95,7 @@ class EggContext:
             return
 
         self.inv_cs_matrix = self.cs_matrix.inverted()
+        self.coord_system = coordsys
 
     def transform_matrix(self, matrix):
         """ Transforms the given matrix from the egg file's coordinate system
@@ -645,7 +659,9 @@ class EggGroupNode:
         elif type in ('GROUP', 'INSTANCE'):
             return EggGroup(name, parent=self)
         elif type == 'JOINT':
-            return EggJoint(name, parent=self)
+            joint = EggJoint(name, parent=self)
+            context.joints[name] = joint
+            return joint
         elif type == 'POLYGON':
             return EggPrimitive()
         elif type == 'TRIANGLEFAN':
@@ -663,7 +679,7 @@ class EggGroupNode:
         elif type == 'NURBSCURVE':
             pass
         elif type == 'TABLE':
-            pass
+            return EggTable(name)
         elif type == 'ANIMPRELOAD':
             pass
 
@@ -962,20 +978,20 @@ class EggJoint(EggGroup):
         bone_dir.normalize()
         connect_child = None
         connect_child_dist = None
-        average_head = Vector((0, 0, 0))
+        average_dist = 0.0
         num_direct_children = 0
 
         for child in self.children:
             # Recurse.  It will return a bone if the child is an EggJoint.
             child_bone = child.build_armature(context, armature, bone, matrix)
             if child_bone:
-                average_head += child_bone.head
+                vec = child_bone.head - bone.head
+                dist = bone_dir.dot(vec)
+                average_dist += dist
                 num_direct_children += 1
 
-                vec = child_bone.head - bone.head
-                if bone_dir.dot(vec.normalized()) >= 0.99999:
+                if dist > 0.0001 and bone_dir.dot(vec.normalized()) >= 0.99999:
                     # Yes, it lies along the length.
-                    dist = bone_dir.dot(vec)
                     if connect_child_dist is None or dist < connect_child_dist:
                         connect_child = child_bone
                         connect_child_dist = dist
@@ -986,7 +1002,9 @@ class EggJoint(EggGroup):
             connect_child.use_connect = True
         elif num_direct_children > 0:
             # No, use the average of the bone's children.
-            bone.tail = average_head * (1.0 / num_direct_children)
+            length = average_dist / num_direct_children
+            if length > 0.0001:
+                bone.length = length
         else:
             # An extremity.  Um, why not check whether *any* bone starts on
             # this bone's axis, and use that as length, because that happens
@@ -1008,7 +1026,11 @@ class EggJoint(EggGroup):
             elif parent:
                 # Otherwise, inherit the length from the distance to the
                 # parent bone.  This is a guess, but not such a bad one.
-                bone.length = (bone.head - parent.head).length
+                parent_length = (bone.head - parent.head).length
+                if parent_length > 0.0001:
+                    bone.length = parent_length
+                else:
+                    bone.length = parent.length
 
         # Connect all the bone's children that match up well.
         for child in bone.children:
@@ -1036,3 +1058,239 @@ class EggGroupVertexRef:
 
         elif type.upper() == 'REF':
             self.pool = values[0]
+
+
+class EggTable(EggGroupNode):
+    def __init__(self, name):
+        EggGroupNode.__init__(self)
+        self.name = name
+
+    def begin_child(self, context, type, name, values):
+        type = type.upper()
+
+        if type == 'TABLE':
+            return EggTable(name)
+        elif type == 'BUNDLE':
+            return EggBundle(name)
+        elif type == 'XFM$ANIM':
+            return EggXfmSAnim()
+        elif type == 'XFM$ANIM_S$':
+            return EggXfmSAnim_S()
+
+    def build_animations(self, context, bundle):
+        for child in self.children:
+            if isinstance(child, EggXfmSAnim):
+                bundle.add_curves(context, self.name, child)
+            else:
+                child.build_animations(context, bundle)
+
+
+class EggBundle(EggTable):
+    def __init__(self, name):
+        EggTable.__init__(self, name)
+        self.skeleton = None
+
+    def end_child(self, context, type, name, child):
+        if child.name == '<skeleton>':
+            self.skeleton = child
+
+    def build_tree(self, context, parent=None, inv_matrix=None):
+        if self.skeleton:
+            self.action = bpy.data.actions.new(self.name)
+            self.action.use_fake_user = True
+
+            self.skeleton.build_animations(context, self)
+
+    def build_animations(self, context, bundle):
+        context.error("Cannot have <Bundle> under another <Bundle>")
+        return
+
+    def add_curves(self, context, name, data):
+        """ Adds the curves for the given joint from the given <Xfm$Anim>. """
+
+        fcurves = self.action.fcurves
+        prefix = 'pose.bones["{}"].'.format(name)
+
+        # First, convert all per-frame data to matrices.  This is just easier.
+        init_matrix = Matrix.Identity(4)
+        num_frames = data.num_frames
+        matrices = [init_matrix for i in range(num_frames)]
+
+        joint_matrix = context.joints[name].matrix
+
+        # Make sure all channels have all frames defined.
+        channels = data.channels
+        for c in channels:
+            while len(channels[c]) < data.num_frames:
+                channels[c].append(channels[c][-1])
+
+        if 'i' in channels or 'j' in channels or 'k' in channels:
+            if 'i' not in channels:
+                channels['i'] = [1.0] * data.num_frames
+            if 'j' not in channels:
+                channels['j'] = [1.0] * data.num_frames
+            if 'k' not in channels:
+                channels['k'] = [1.0] * data.num_frames
+
+        if 'x' in channels or 'y' in channels or 'z' in channels:
+            if 'x' not in channels:
+                channels['x'] = [0.0] * data.num_frames
+            if 'y' not in channels:
+                channels['y'] = [0.0] * data.num_frames
+            if 'z' not in channels:
+                channels['z'] = [0.0] * data.num_frames
+
+        for o in data.order:
+            if o == 's' and 'i' in channels and 'j' in channels and 'k' in channels:
+                #TODO: shear?
+                chan_x = channels['i']
+                chan_y = channels['j']
+                chan_z = channels['k']
+                for i in range(num_frames):
+                    matrices[i] = Matrix(((chan_x[i], 0, 0, 0),
+                                          (0, chan_y[i], 0, 0),
+                                          (0, 0, chan_z[i], 0),
+                                          (0, 0, 0, 1))) * matrices[i]
+
+            elif o == 'h' and 'h' in channels:
+                for i, h in enumerate(channels['h']):
+                    matrices[i] = Matrix.Rotation(radians(h), 4, context.up_vector) * matrices[i]
+
+            elif o == 'p' and 'p' in channels:
+                for i, p in enumerate(channels['p']):
+                    matrices[i] = Matrix.Rotation(radians(p), 4, context.right_vector) * matrices[i]
+
+            elif o == 'r' and 'r' in channels:
+                if data.order == 'sphrt':
+                    for i, r in enumerate(channels['r']):
+                        matrices[i] = Matrix.Rotation(radians(-r), 4, context.forward_vector) * matrices[i]
+                else:
+                    for i, r in enumerate(channels['r']):
+                        matrices[i] = Matrix.Rotation(radians(r), 4, context.forward_vector) * matrices[i]
+
+            elif o == 't' and 'x' in channels and 'y' in channels and 'z' in channels:
+                chan_x = channels['x']
+                chan_y = channels['y']
+                chan_z = channels['z']
+                for i, v in enumerate(zip(chan_x, chan_y, chan_z)):
+                    matrices[i] = Matrix.Translation(v) * matrices[i]
+
+        # Multiply out the joint transform.
+        for i, m in enumerate(matrices):
+            matrices[i] = context.transform_matrix(joint_matrix.inverted() * m)
+
+        if 'x' in channels or 'y' in channels or 'z' in channels:
+            x_curve = fcurves.new(prefix + 'location', 0)
+            y_curve = fcurves.new(prefix + 'location', 1)
+            z_curve = fcurves.new(prefix + 'location', 2)
+            x_curve.keyframe_points.add(num_frames)
+            y_curve.keyframe_points.add(num_frames)
+            z_curve.keyframe_points.add(num_frames)
+
+            for i, m in enumerate(matrices):
+                translation = m.to_translation()
+                x_curve.keyframe_points[i].co = (i, translation[0])
+                y_curve.keyframe_points[i].co = (i, translation[1])
+                z_curve.keyframe_points[i].co = (i, translation[2])
+
+            x_curve.update()
+            y_curve.update()
+            z_curve.update()
+
+        if 'h' in channels or 'p' in channels or 'r' in channels:
+            w_curve = fcurves.new(prefix + 'rotation_quaternion', 0)
+            x_curve = fcurves.new(prefix + 'rotation_quaternion', 1)
+            y_curve = fcurves.new(prefix + 'rotation_quaternion', 2)
+            z_curve = fcurves.new(prefix + 'rotation_quaternion', 3)
+            w_curve.keyframe_points.add(num_frames)
+            x_curve.keyframe_points.add(num_frames)
+            y_curve.keyframe_points.add(num_frames)
+            z_curve.keyframe_points.add(num_frames)
+
+            for i, m in enumerate(matrices):
+                quaternion = m.to_quaternion()
+                w_curve.keyframe_points[i].co = (i, quaternion.w)
+                x_curve.keyframe_points[i].co = (i, quaternion.x)
+                y_curve.keyframe_points[i].co = (i, quaternion.y)
+                z_curve.keyframe_points[i].co = (i, quaternion.z)
+
+            w_curve.update()
+            x_curve.update()
+            y_curve.update()
+            z_curve.update()
+
+        if 'i' in channels or 'j' in channels or 'k' in channels:
+            x_curve = fcurves.new(prefix + 'scale', 0)
+            y_curve = fcurves.new(prefix + 'scale', 1)
+            z_curve = fcurves.new(prefix + 'scale', 2)
+            x_curve.keyframe_points.add(num_frames)
+            y_curve.keyframe_points.add(num_frames)
+            z_curve.keyframe_points.add(num_frames)
+
+            for i, m in enumerate(matrices):
+                scale = m.to_scale()
+                x_curve.keyframe_points[i].co = (i, scale[0])
+                y_curve.keyframe_points[i].co = (i, scale[1])
+                z_curve.keyframe_points[i].co = (i, scale[2])
+
+            x_curve.update()
+            y_curve.update()
+            z_curve.update()
+
+
+class EggXfmSAnim(EggGroupNode):
+    def __init__(self):
+        self.fps = None
+        self.order = 'srpht'
+        self.channels = {}
+        self.num_frames = 0
+
+    def begin_child(self, context, type, name, values):
+        if type.upper() in ('SCALAR', 'CHAR*'):
+            name = name.lower()
+
+            if name == 'order':
+                self.order = values[0].lower()
+            elif name == 'fps':
+                self.fps = parse_number(values[0])
+            elif name == 'contents':
+                self.contents = values[0].lower()
+
+        elif type == 'V' or type == 'v':
+            values = [parse_number(v) for v in values]
+            num_channels = len(self.contents)
+            self.num_frames = len(values) // len(self.contents)
+            for i, c in enumerate(self.contents):
+                self.channels[c] = values[i::num_channels]
+
+
+class EggXfmSAnim_S(EggXfmSAnim):
+    def begin_child(self, context, type, name, values):
+        type = type.upper()
+
+        if type in ('SCALAR', 'CHAR*'):
+            name = name.lower()
+
+            if name == 'order':
+                self.order = values[0].lower()
+            elif name == 'fps':
+                self.fps = parse_number(values[0])
+            elif name == 'contents':
+                self.contents = values[0].lower()
+
+        elif type == 'S$ANIM':
+            return EggSAnim()
+
+    def end_child(self, context, type, name, child):
+        if isinstance(child, EggSAnim):
+            self.channels[name] = child.values
+            self.num_frames = max(self.num_frames, len(child.values))
+
+
+class EggSAnim:
+    def __init__(self):
+        self.values = []
+
+    def begin_child(self, context, type, name, values):
+        if type.upper() == 'V':
+            self.values += [parse_number(v) for v in values]

@@ -39,6 +39,13 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     files = bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
 
     def execute(self, context):
+        context = importer.EggContext()
+        context.info = lambda msg: self.report({'INFO'}, msg)
+        context.warn = lambda msg: self.report({'WARNING'}, msg)
+        context.error = lambda msg: self.report({'ERROR'}, msg)
+        context.search_dir = self.directory
+        roots = []
+
         for file in self.files:
             path = os.path.join(self.directory, file.name)
 
@@ -46,19 +53,17 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
                 data = zlib.decompress(open(path, 'rb').read(), 32 + 15).decode('utf-8')
             else:
                 data = open(path, 'r').read()
-            fp = io.StringIO(data)
 
-            context = importer.EggContext()
-            context.info = lambda msg: self.report({'INFO'}, msg)
-            context.warn = lambda msg: self.report({'WARNING'}, msg)
-            context.error = lambda msg: self.report({'ERROR'}, msg)
-            context.search_dir = self.directory
+            fp = io.StringIO(data)
             root = importer.EggGroupNode()
             eggparser.parse_egg(fp, root, context)
             fp.close()
+            roots.append(root)
+
+        for root in roots:
             root.build_tree(context)
-            context.assign_vertex_groups()
-            context.final_report()
+        context.assign_vertex_groups()
+        context.final_report()
         return {'FINISHED'}
 
     def invoke(self, context, event):
