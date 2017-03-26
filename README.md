@@ -21,7 +21,7 @@ tested.
 
 Supported features:
 - .egg.pz and .egg.gz files
-- Basic geometry
+- Basic geometry, incl. tristrips and trifans
 - All transform types
 - Materials
 - Textures
@@ -35,12 +35,13 @@ Supported features:
 
 Yet to do:
 - Improve performance of parser
-- Triangle fans, strips, and lines
+- Lines, patches
 - NURBS surfaces and curves
 - Morph targets
 - Animations
 - Vertex colors
 - Level of detail
+- Don't import normals as custom normals if not necessary
 
 ## Limitations
 

@@ -466,7 +466,8 @@ class EggVertex:
 
 
 class EggVertexPool:
-    def __init__(self):
+    def __init__(self, name):
+        self.name = name
         self._vertices = []
         self.groups = set()
 
@@ -534,6 +535,90 @@ class EggPrimitive:
         elif type == 'MREF':
             self.material = context.materials[values[0]]
 
+        elif type == 'NORMAL':
+            self.normal = tuple(parse_number(v) for v in values)
+
+        elif type == 'RGBA':
+            self.color = tuple(parse_number(v) for v in values)
+
+
+class EggTriangleStrip(EggPrimitive):
+
+    __slots__ = 'components'
+
+    def begin_child(self, context, type, name, values):
+        if type.upper() == 'VERTEXREF':
+            indices = [int(v) for v in values]
+            self.indices = tuple(indices)
+            self.components = []
+            prevprev = indices.pop(0)
+            prev = indices.pop(0)
+            flip = False
+            while indices:
+                index = indices.pop(0)
+                prim = EggPrimitive()
+                # I don't think the flipping is truly necessary for Blender.
+                if flip:
+                    prim.indices = [prev, prevprev, index]
+                    flip = False
+                else:
+                    prim.indices = [prevprev, prev, index]
+                    flip = True
+                # It's fine to copy over the attributes, since the .egg syntax
+                # only allows per-component settings after the <VertexRef>.
+                prim.material = self.material
+                prim.color = self.color
+                prim.normal = self.normal
+                prim.bface = self.bface
+                prim.alpha = self.alpha
+                prim.visibility = self.visibility
+                prim.textures = self.textures
+                prevprev = prev
+                prev = index
+                self.components.append(prim)
+            return self # To catch the <Ref>
+
+        elif type.upper() == 'COMPONENT':
+            index = int(name)
+            return self.components[index]
+        else:
+            EggPrimitive.begin_child(self, context, type, name, values)
+
+
+class EggTriangleFan(EggPrimitive):
+
+    __slots__ = 'components'
+
+    def begin_child(self, context, type, name, values):
+        if type.upper() == 'VERTEXREF':
+            indices = [int(v) for v in values]
+            self.indices = tuple(indices)
+            self.components = []
+            first = indices.pop(0)
+            prev = indices.pop(0)
+            while indices:
+                index = indices.pop(0)
+                prim = EggPrimitive()
+                prim.indices = [first, prev, index]
+                # It's fine to copy over the attributes, since the .egg syntax
+                # only allows per-component settings after the <VertexRef>.
+                prim.material = self.material
+                prim.color = self.color
+                prim.normal = self.normal
+                prim.bface = self.bface
+                prim.alpha = self.alpha
+                prim.visibility = self.visibility
+                prim.textures = self.textures
+                prev = index
+                self.components.append(prim)
+            return self # To catch the <Ref>
+
+        elif type.upper() == 'COMPONENT':
+            index = int(name)
+            return self.components[index]
+        else:
+            EggPrimitive.begin_child(self, context, type, name, values)
+
 
 class EggGroupNode:
     def __init__(self):
@@ -554,7 +639,7 @@ class EggGroupNode:
             context.materials[name] = mat
             return mat
         elif type == 'VERTEXPOOL':
-            vpool = EggVertexPool()
+            vpool = EggVertexPool(name)
             context.vertex_pools[name] = vpool
             return vpool
         elif type in ('GROUP', 'INSTANCE'):
@@ -564,9 +649,9 @@ class EggGroupNode:
         elif type == 'POLYGON':
             return EggPrimitive()
         elif type == 'TRIANGLEFAN':
-            pass
+            return EggTriangleFan()
         elif type == 'TRIANGLESTRIP':
-            pass
+            return EggTriangleStrip()
         elif type == 'PATCH':
             pass
         elif type == 'POINTLIGHT':
@@ -683,80 +768,86 @@ class EggGroup(EggGroupNode):
             if self.mesh is None:
                 self.mesh = bpy.data.meshes.new(self.name)
 
-            if child.normal:
-                self.have_normals = True
-            poly_normal = child.normal or (0, 0, 0)
-
-            # Create the loops.  A loop is an occurrence of a vertex in a
-            # polygon.
-            mesh = self.mesh
-            loops = mesh.loops
-            loop_offset = len(loops)
-            loops.add(len(child.indices))
-            for index, loop in zip(child.indices, loops[loop_offset:]):
-                try:
-                    vertex = vpool[index]
-                except IndexError:
-                    context.error("Primitive references index {}, which is not defined in vertex pool '{}'".format(index, child.pool))
-                    # Skip the face.  This will leave some unused loops, but
-                    # they will be cleaned up by validate().
-                    return EggGroupNode.end_child(self, context, type, name, child)
-
-                loop.vertex_index = self.get_bvert(vertex)
-
-                vertex_normal = vertex.normal
-                if vertex_normal:
-                    self.have_normals = True
-                    self.normals.append(vertex_normal or poly_normal)
-                else:
-                    self.normals.append(vertex_normal or poly_normal)
-
-                for name, uv in vertex.uv_map.items():
-                    if name not in mesh.uv_layers:
-                        mesh.uv_textures.new(name)
-                    mesh.uv_layers[name].data[loop.index].uv = uv
-
-            # Create a polygon referencing those loops.
-            poly_index = len(mesh.polygons)
-            mesh.polygons.add(1)
-            poly = mesh.polygons[poly_index]
-            poly.loop_start = loop_offset
-            poly.loop_total = len(child.indices)
-
-            # Assign the highest priority texture that uses a given UV set to
-            # the UV texture.  If there are multiple textures with the same
-            # priority, use the first one.
-            set_textures = {}
-            for texture in child.textures:
-                uv_name = texture.uv_name or DEFAULT_UV_NAME
-                try:
-                    uv_texture = mesh.uv_textures[uv_name]
-                except KeyError:
-                    # Display a warning.  Since this will probably be the case
-                    # for every polygon in this mesh, display it only once.
-                    if child.pool not in texture.warned_vpools:
-                        texture.warned_vpools.add(child.pool)
-                        context.warn("Texture {} references UV set {} which is not present on any vertex in {}".format(texture.texture.name, texture.uv_name, self.name))
-                    continue
-
-                if uv_name not in set_textures or texture.priority > set_textures[uv_name].priority:
-                    set_textures[uv_name] = texture
-                    uv_texture.data[poly_index].image = texture.texture.image
-
-            # Check if we already have a material for this combination.
-            bmat = child.material.get_material(child.textures, child.color, child.bface, child.alpha)
-            if bmat in self.materials:
-                index = self.materials.index(bmat)
+            if hasattr(child, 'components'):
+                for component in child.components:
+                    self.add_polygon(component, vpool)
             else:
-                index = len(self.materials)
-                self.materials.append(bmat)
-                mesh.materials.append(bmat)
-            poly.material_index = index
+                self.add_polygon(child, vpool)
 
         elif isinstance(child, EggGroup):
             self.any_geometry_below |= child.any_geometry_below
 
         return EggGroupNode.end_child(self, context, type, name, child)
+
+    def add_polygon(self, prim, vpool):
+        if prim.normal:
+            self.have_normals = True
+        poly_normal = prim.normal or (0, 0, 0)
+
+        # Create the loops.  A loop is an occurrence of a vertex in a polygon.
+        mesh = self.mesh
+        loops = mesh.loops
+        loop_offset = len(loops)
+        loops.add(len(prim.indices))
+        for index, loop in zip(prim.indices, loops[loop_offset:]):
+            try:
+                vertex = vpool[index]
+            except IndexError:
+                context.error("Primitive references index {}, which is not defined in vertex pool '{}'".format(index, vpool.name))
+                # Skip the face.  This will leave some unused loops, but
+                # they will be cleaned up by validate().
+                return
+
+            loop.vertex_index = self.get_bvert(vertex)
+
+            vertex_normal = vertex.normal
+            if vertex_normal:
+                self.have_normals = True
+                self.normals.append(vertex_normal or poly_normal)
+            else:
+                self.normals.append(vertex_normal or poly_normal)
+
+            for name, uv in vertex.uv_map.items():
+                if name not in mesh.uv_layers:
+                    mesh.uv_textures.new(name)
+                mesh.uv_layers[name].data[loop.index].uv = uv
+
+        # Create a polygon referencing those loops.
+        poly_index = len(mesh.polygons)
+        mesh.polygons.add(1)
+        poly = mesh.polygons[poly_index]
+        poly.loop_start = loop_offset
+        poly.loop_total = len(prim.indices)
+
+        # Assign the highest priority texture that uses a given UV set to
+        # the UV texture.  If there are multiple textures with the same
+        # priority, use the first one.
+        set_textures = {}
+        for texture in prim.textures:
+            uv_name = texture.uv_name or DEFAULT_UV_NAME
+            try:
+                uv_texture = mesh.uv_textures[uv_name]
+            except KeyError:
+                # Display a warning.  Since this will probably be the case
+                # for every polygon in this mesh, display it only once.
+                if vpool.name not in texture.warned_vpools:
+                    texture.warned_vpools.add(vpool.name)
+                    context.warn("Texture {} references UV set {} which is not present on any vertex in {}".format(texture.texture.name, texture.uv_name, self.name))
+                continue
+
+            if uv_name not in set_textures or texture.priority > set_textures[uv_name].priority:
+                set_textures[uv_name] = texture
+                uv_texture.data[poly_index].image = texture.texture.image
+
+        # Check if we already have a material for this combination.
+        bmat = prim.material.get_material(prim.textures, prim.color, prim.bface, prim.alpha)
+        if bmat in self.materials:
+            index = self.materials.index(bmat)
+        else:
+            index = len(self.materials)
+            self.materials.append(bmat)
+            mesh.materials.append(bmat)
+        poly.material_index = index
 
     def build_tree(self, context, parent, inv_matrix=None):
         """ Walks the hierarchy of groups and builds the Blender object graph.
