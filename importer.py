@@ -163,8 +163,8 @@ class EggContext:
                 indices = set()
                 for index in vertex_ref.indices:
                     vertex = vpool[index]
-                    if vertex.pos in group.vertices:
-                        indices.add(group.vertices[vertex.pos])
+                    if vertex in group.vertices:
+                        indices.add(group.vertices[vertex])
 
                 if indices:
                     vertex_group.add(tuple(indices), vertex_ref.membership, 'ADD')
@@ -466,17 +466,33 @@ class EggVertex:
         self.dxyzs = {}
 
     def begin_child(self, context, type, name, values):
-        if type.upper() == 'NORMAL':
+        type = type.upper()
+
+        if type == 'NORMAL':
             self.normal = tuple(parse_number(v) for v in values)
 
-        elif type.upper() == 'RGBA':
-            self.color = [parse_number(v) for v in values]
+        elif type == 'RGBA':
+            self.color = tuple(parse_number(v) for v in values)
 
-        elif type.upper() == 'UV':
+        elif type == 'UV':
             self.uv_map[name or DEFAULT_UV_NAME] = [parse_number(v) for v in values]
 
-        elif type.upper() == 'AUX':
+        elif type == 'AUX':
             self.aux_map[name] = [parse_number(v) for v in values]
+
+        elif type == 'DXYZ':
+            if not name:
+                name = values.pop(0)
+            self.dxyzs[name] = tuple(parse_number(v) for v in values)
+
+    def __hash__(self):
+        return hash(self.pos)
+
+    def __eq__(self, other):
+        return self.pos == other.pos
+
+    def __ne__(self, other):
+        return self.pos != other.pos
 
 
 class EggVertexPool:
@@ -634,7 +650,11 @@ class EggTriangleFan(EggPrimitive):
             EggPrimitive.begin_child(self, context, type, name, values)
 
 
-class EggGroupNode:
+class EggNode:
+    pass
+
+
+class EggGroupNode(EggNode):
     def __init__(self):
         self.children = []
 
@@ -684,7 +704,7 @@ class EggGroupNode:
             pass
 
     def end_child(self, context, type, name, child):
-        if isinstance(child, EggGroupNode):
+        if isinstance(child, EggNode):
             self.children.append(child)
 
     def build_tree(self, context, parent=None, inv_matrix=None):
@@ -712,6 +732,7 @@ class EggGroup(EggGroupNode):
         self.first_vertex = 0
         self.normals = []
         self.have_normals = False
+        self.shape_keys = set()
         self.materials = []
         self.dart = False
 
@@ -721,16 +742,18 @@ class EggGroup(EggGroupNode):
     def get_bvert(self, vert):
         # Vertices are keyed by position only, since normals and UVs are
         # defined per-loop.
-        key = vert.pos
         vertices = self.vertices
-        if key in vertices:
-            return vertices[key]
+        if vert in vertices:
+            return vertices[vert]
 
-        index = len(self.mesh.vertices)
-        self.mesh.vertices.add(1)
-        bvert = self.mesh.vertices[index]
-        bvert.co = key
-        vertices[key] = index
+        mesh = self.mesh
+        index = len(mesh.vertices)
+        mesh.vertices.add(1)
+        bvert = mesh.vertices[index]
+        bvert.co = vert.pos
+        vertices[vert] = index
+
+        self.shape_keys.update(vert.dxyzs.keys())
         return index
 
     def begin_child(self, context, type, name, values):
@@ -786,16 +809,16 @@ class EggGroup(EggGroupNode):
 
             if hasattr(child, 'components'):
                 for component in child.components:
-                    self.add_polygon(component, vpool)
+                    self.add_polygon(context, component, vpool)
             else:
-                self.add_polygon(child, vpool)
+                self.add_polygon(context, child, vpool)
 
         elif isinstance(child, EggGroup):
             self.any_geometry_below |= child.any_geometry_below
 
         return EggGroupNode.end_child(self, context, type, name, child)
 
-    def add_polygon(self, prim, vpool):
+    def add_polygon(self, context, prim, vpool):
         if prim.normal:
             self.have_normals = True
         poly_normal = prim.normal or (0, 0, 0)
@@ -919,13 +942,31 @@ class EggGroup(EggGroupNode):
             child.build_tree(context, object, inv_matrix)
 
         # Awkward, but it seems there's no other way to set a game property
-        # or create bones.
-        if self.properties or self.dart:
+        # or create bones or add shape keys.
+        if self.properties or self.dart or self.shape_keys:
             active = bpy.context.scene.objects.active
             bpy.context.scene.objects.active = object
             for name, value in self.properties.items():
                 bpy.ops.object.game_property_new(type='STRING', name=name)
                 object.game.properties[name].value = value
+
+            if self.shape_keys:
+                # Add the basis key first.
+                bpy.ops.object.shape_key_add()
+                basis_data = bpy.context.object.active_shape_key.data
+
+                for key in sorted(self.shape_keys):
+                    bpy.ops.object.shape_key_add()
+                    shape_key = bpy.context.object.active_shape_key
+                    shape_key.name = key
+                    shape_key.slider_min = -10
+                    shape_key.slider_max = 10
+                    data = shape_key.data
+
+                    for vert, index in self.vertices.items():
+                        dxyz = vert.dxyzs.get(key)
+                        if dxyz:
+                            data[index].co = basis_data[index].co + Vector(dxyz)
 
             if self.dart:
                 #bpy.context.scene.update()
@@ -1076,6 +1117,8 @@ class EggTable(EggGroupNode):
             return EggXfmSAnim()
         elif type == 'XFM$ANIM_S$':
             return EggXfmSAnim_S()
+        elif type == 'S$ANIM':
+            return EggSAnim(name)
 
     def build_animations(self, context, bundle):
         for child in self.children:
@@ -1089,10 +1132,13 @@ class EggBundle(EggTable):
     def __init__(self, name):
         EggTable.__init__(self, name)
         self.skeleton = None
+        self.morph = None
 
     def end_child(self, context, type, name, child):
         if child.name == '<skeleton>':
             self.skeleton = child
+        elif child.name == 'morph':
+            self.morph = child
 
     def build_tree(self, context, parent=None, inv_matrix=None):
         if self.skeleton:
@@ -1100,6 +1146,15 @@ class EggBundle(EggTable):
             self.action.use_fake_user = True
 
             self.skeleton.build_animations(context, self)
+
+        if self.morph:
+            morph_action = bpy.data.actions.new(self.name)
+            morph_action.use_fake_user = True
+            morph_action.id_root = 'KEY'
+
+            for child in self.morph.children:
+                if isinstance(child, EggSAnim):
+                    self.add_morph(morph_action, child)
 
     def build_animations(self, context, bundle):
         context.error("Cannot have <Bundle> under another <Bundle>")
@@ -1237,6 +1292,17 @@ class EggBundle(EggTable):
             y_curve.update()
             z_curve.update()
 
+    def add_morph(self, action, data):
+        """ Adds the curve for a morph target to this bundle's action. """
+
+        fcurves = action.fcurves
+        curve = fcurves.new('key_blocks["{}"].value'.format(data.name), 0)
+        keyframe_points = curve.keyframe_points
+        keyframe_points.add(len(data.values))
+
+        for i, v in enumerate(data.values):
+            keyframe_points[i].co = (i, v)
+
 
 class EggXfmSAnim(EggGroupNode):
     def __init__(self):
@@ -1279,7 +1345,7 @@ class EggXfmSAnim_S(EggXfmSAnim):
                 self.contents = values[0].lower()
 
         elif type == 'S$ANIM':
-            return EggSAnim()
+            return EggSAnim(name)
 
     def end_child(self, context, type, name, child):
         if isinstance(child, EggSAnim):
@@ -1287,8 +1353,12 @@ class EggXfmSAnim_S(EggXfmSAnim):
             self.num_frames = max(self.num_frames, len(child.values))
 
 
-class EggSAnim:
-    def __init__(self):
+class EggSAnim(EggNode):
+
+    __slots__ = 'name', 'values'
+
+    def __init__(self, name):
+        self.name = name
         self.values = []
 
     def begin_child(self, context, type, name, values):
