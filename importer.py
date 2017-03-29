@@ -842,8 +842,13 @@ class EggGroup(EggGroupNode):
             self.have_normals = True
         poly_normal = prim.normal or (0, 0, 0)
 
-        # Create the loops.  A loop is an occurrence of a vertex in a polygon.
+        # Create a polygon.
         mesh = self.mesh
+        poly_index = len(mesh.polygons)
+        mesh.polygons.add(1)
+        poly = mesh.polygons[poly_index]
+
+        # Create the loops.  A loop is an occurrence of a vertex in a polygon.
         loops = mesh.loops
         loop_offset = len(loops)
         loops.add(len(prim.indices))
@@ -862,6 +867,7 @@ class EggGroup(EggGroupNode):
             if vertex_normal:
                 self.have_normals = True
                 self.normals.append(vertex_normal or poly_normal)
+                poly.use_smooth = True
             else:
                 self.normals.append(vertex_normal or poly_normal)
 
@@ -870,10 +876,7 @@ class EggGroup(EggGroupNode):
                     mesh.uv_textures.new(name)
                 mesh.uv_layers[name].data[loop.index].uv = uv
 
-        # Create a polygon referencing those loops.
-        poly_index = len(mesh.polygons)
-        mesh.polygons.add(1)
-        poly = mesh.polygons[poly_index]
+        # Reference those loops in the polygon.
         poly.loop_start = loop_offset
         poly.loop_total = len(prim.indices)
 
@@ -917,8 +920,19 @@ class EggGroup(EggGroupNode):
             data = self.mesh
             data.update(calc_edges=True, calc_tessface=True)
             if self.have_normals:
-                data.normals_split_custom_set(self.normals)
-                data.use_auto_smooth = True
+                # Check if the mesh just uses smooth normals.  If so, don't
+                # bother importing custom normals.
+                data.calc_normals()
+                max_diff = 0
+                for normal1, l in zip(self.normals, data.loops):
+                    normal2 = data.vertices[l.vertex_index].normal
+                    diff = (normal2 - Vector(normal1)).length_squared
+                    max_diff = max(diff, max_diff)
+
+                if max_diff > 0.01:
+                    data.normals_split_custom_set(self.normals)
+                    data.use_auto_smooth = True
+
             if data.validate(verbose=True):
                 context.info("Corrected invalid geometry in mesh '{}'.".format(data.name))
 

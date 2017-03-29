@@ -13,6 +13,20 @@ This is a Blender addon that does not require a Panda3D installation.
 Clone this repository in your GitHub addons directory, or download as a .zip
 file and use "Install from File" in the Blender User Preferences window.
 
+## Normals
+
+The importer attempts to create a completely accurate representation of the
+model in Blender.  This means that it will only avoid importing a custom set
+of normal data if it can prove that Blender would generate the same normals.
+
+In many cases it will not be able to prove this, so it may unnecessarily
+create Split Normals Data for your mesh.  This may make the normals of the
+mesh look funny in Blender after editing or animation.
+
+To disable this, select the Mesh data tab, and under "Geometry Data", click
+"Clear Custom Split Normals Data".  You may also want to disable "Auto Smooth"
+if desired.
+
 ## Animations
 
 Skeletal animations are supported, experimentally.  A model needs to be loaded
@@ -34,6 +48,7 @@ tested.
 Supported features:
 - .egg.pz and .egg.gz files
 - Basic geometry, incl. tristrips and trifans
+- Custom normals
 - All transform types
 - Materials
 - Textures
@@ -41,7 +56,6 @@ Supported features:
 - Collide and ObjectType (as game properties)
 - Collision masks (as game properties)
 - Coordinate system conversion
-- Custom normals
 - Multiple UV coordinate sets
 - Armatures, skinning
 - Default animation pose
@@ -54,7 +68,6 @@ Yet to do:
 - NURBS surfaces and curves
 - Vertex colors
 - Level of detail
-- Don't import normals as custom normals if not necessary
 
 ## Limitations
 
