@@ -44,6 +44,7 @@ Supported features:
 - Custom normals
 - Multiple UV coordinate sets
 - Armatures, skinning
+- Default animation pose
 - Bone animations
 - Morph targets
 
@@ -51,7 +52,6 @@ Yet to do:
 - Improve performance of parser
 - Lines, patches
 - NURBS surfaces and curves
-- Read default pose
 - Vertex colors
 - Level of detail
 - Don't import normals as custom normals if not necessary

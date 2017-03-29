@@ -718,6 +718,12 @@ class EggGroupNode(EggNode):
         for child in self.children:
             child.build_armature(*args, **kwargs)
 
+    def apply_default_pose(self, context, pose):
+        """ Recursively applies the default pose to the model. """
+
+        for child in self.children:
+            child.apply_default_pose(context, pose)
+
 
 class EggGroup(EggGroupNode):
     def __init__(self, name, parent):
@@ -728,6 +734,7 @@ class EggGroup(EggGroupNode):
         self.vertices = {}
 
         self.matrix = None
+        self.default_pose = None
         self.mesh = None
         self.first_vertex = 0
         self.normals = []
@@ -738,6 +745,7 @@ class EggGroup(EggGroupNode):
 
         # Keep track of whether there is any geometry below this node.
         self.any_geometry_below = False
+        self.has_default_pose = False
 
     def get_bvert(self, vert):
         # Vertices are keyed by position only, since normals and UVs are
@@ -789,14 +797,24 @@ class EggGroup(EggGroupNode):
             # Do we need to consider other dart types?
             self.dart = values[0].strip().lower() not in ('0', 'none')
 
+        elif type == 'DEFAULTPOSE':
+            return EggTransform()
+
         return EggGroupNode.begin_child(self, context, type, name, values)
 
     def end_child(self, context, type, name, child):
         if isinstance(child, EggTransform):
-            if self.matrix is not None:
-                self.matrix *= child.matrix
+            if type.upper() == 'DEFAULTPOSE':
+                self.has_default_pose = True
+                if self.default_pose is not None:
+                    self.default_pose *= child.matrix
+                else:
+                    self.default_pose = child.matrix
             else:
-                self.matrix = child.matrix
+                if self.matrix is not None:
+                    self.matrix *= child.matrix
+                else:
+                    self.matrix = child.matrix
 
         elif isinstance(child, EggPrimitive):
             self.any_geometry_below = True
@@ -815,6 +833,7 @@ class EggGroup(EggGroupNode):
 
         elif isinstance(child, EggGroup):
             self.any_geometry_below |= child.any_geometry_below
+            self.has_default_pose |= child.has_default_pose
 
         return EggGroupNode.end_child(self, context, type, name, child)
 
@@ -974,6 +993,11 @@ class EggGroup(EggGroupNode):
                 self.build_armature(context, object, None, Matrix())
                 bpy.ops.object.mode_set(mode='OBJECT')
 
+                # If any of the joints below this level define a DefaultPose,
+                # apply this to the pose bones.
+                if self.has_default_pose:
+                    self.apply_default_pose(context, object.pose)
+
             bpy.context.scene.objects.active = active
 
         return object
@@ -1010,6 +1034,7 @@ class EggJoint(EggGroup):
         bone.parent = parent
         bone.tail = Vector((0, 1, 0))
         bone.matrix = matrix
+        self.bone_name = bone.name
 
         # Find the closest child that lies directly along the length of this
         # bone.  That child's head becomes this bone's tail.
@@ -1079,6 +1104,19 @@ class EggJoint(EggGroup):
                 child.use_connect = True
 
         return bone
+
+    def apply_default_pose(self, context, pose):
+        """ Recursively applies the default pose to the model. """
+
+        matrix = self.default_pose or self.matrix or Matrix.Identity(4)
+        matrix = context.transform_matrix(matrix)
+
+        pose_bone = pose.bones[self.bone_name]
+        if pose_bone.parent:
+            matrix = pose_bone.parent.matrix * matrix
+        pose_bone.matrix = matrix
+
+        EggGroupNode.apply_default_pose(self, context, pose)
 
 
 class EggGroupVertexRef:
