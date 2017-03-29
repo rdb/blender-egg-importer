@@ -765,6 +765,7 @@ class EggGroup(EggGroupNode):
         return index
 
     def begin_child(self, context, type, name, values):
+        orig_type = type
         type = type.upper()
 
         #if type in ('SCALAR', 'CHAR*', 'BILLBOARD', 'DCS', 'DART', 'SWITCH', 'OBJECTTYPE', 'TAG', 'MODEL', 'TEXLIST', 'REF'):
@@ -777,7 +778,7 @@ class EggGroup(EggGroupNode):
                 self.properties[name] = values[0]
 
         elif type in ('COLLIDE', 'OBJECTTYPE'):
-            self.properties[type] = values[0]
+            self.properties[orig_type] = values[0]
 
         elif type == 'TAG':
             # Odd, but the reference .egg parser really intentionally joins
