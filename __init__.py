@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Import Panda3D .egg models",
     "author": "rdb",
-    "version": (0, 1),
+    "version": (1, 0),
     "blender": (2, 74, 0), # Needed for normals_split_custom_set
     "location": "File > Import > Panda3D (.egg)",
     "description": "",
