@@ -461,6 +461,7 @@ class EggVertex:
     def __init__(self, pos):
         self.pos = pos
         self.normal = None
+        self.color = None
         self.uv_map = {}
         self.aux_map = {}
         self.dxyzs = {}
@@ -739,6 +740,8 @@ class EggGroup(EggGroupNode):
         self.first_vertex = 0
         self.normals = []
         self.have_normals = False
+        self.vertex_colors = []
+        self.have_vertex_colors = False
         self.shape_keys = set()
         self.materials = []
         self.dart = False
@@ -872,6 +875,12 @@ class EggGroup(EggGroupNode):
             else:
                 self.normals.append(vertex_normal or poly_normal)
 
+            if vertex.color:
+                self.have_vertex_colors = True
+                self.vertex_colors += vertex.color[:3]
+            else:
+                self.vertex_colors += (1, 1, 1)
+
             for name, uv in vertex.uv_map.items():
                 if name not in mesh.uv_layers:
                     mesh.uv_textures.new(name)
@@ -933,6 +942,10 @@ class EggGroup(EggGroupNode):
                 if max_diff > 0.01:
                     data.normals_split_custom_set(self.normals)
                     data.use_auto_smooth = True
+
+            if self.have_vertex_colors:
+                cols = data.vertex_colors.new()
+                cols.data.foreach_set('color', self.vertex_colors)
 
             if data.validate(verbose=True):
                 context.info("Corrected invalid geometry in mesh '{}'.".format(data.name))

@@ -49,6 +49,7 @@ Supported features:
 - .egg.pz and .egg.gz files
 - Basic geometry, incl. tristrips and trifans
 - Custom normals
+- Vertex colors
 - All transform types
 - Materials
 - Textures
@@ -66,7 +67,6 @@ Yet to do:
 - Improve performance of parser
 - Lines, patches
 - NURBS surfaces and curves
-- Vertex colors
 - Level of detail
 
 ## Limitations
