@@ -708,9 +708,9 @@ class EggGroupNode(EggNode):
         if isinstance(child, EggNode):
             self.children.append(child)
 
-    def build_tree(self, context, parent=None, inv_matrix=None):
+    def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
         for child in self.children:
-            child.build_tree(context, parent, inv_matrix)
+            child.build_tree(context, parent, inv_matrix, under_dart)
 
     def build_armature(self, *args, **kwargs):
         """ Recursively builds up an armature under a group with dart tag.
@@ -920,7 +920,7 @@ class EggGroup(EggGroupNode):
             mesh.materials.append(bmat)
         poly.material_index = index
 
-    def build_tree(self, context, parent, inv_matrix=None):
+    def build_tree(self, context, parent, inv_matrix=None, under_dart=False):
         """ Walks the hierarchy of groups and builds the Blender object graph.
         This needs to happen after adding all the children so that we fully
         know the parent-child hierarchy and transforms. """
@@ -950,7 +950,7 @@ class EggGroup(EggGroupNode):
             if data.validate(verbose=True):
                 context.info("Corrected invalid geometry in mesh '{}'.".format(data.name))
 
-        elif self.dart:
+        elif self.dart and not under_dart:
             data = bpy.data.armatures.new(self.name)
 
         object = bpy.data.objects.new(self.name, data)
@@ -986,7 +986,7 @@ class EggGroup(EggGroupNode):
 
         # Recurse.
         for child in self.children:
-            child.build_tree(context, object, inv_matrix)
+            child.build_tree(context, object, inv_matrix, under_dart or self.dart)
 
         # Awkward, but it seems there's no other way to set a game property
         # or create bones or add shape keys.
@@ -1015,7 +1015,7 @@ class EggGroup(EggGroupNode):
                         if dxyz:
                             data[index].co = basis_data[index].co + Vector(dxyz)
 
-            if self.dart:
+            if self.dart and not under_dart:
                 #bpy.context.scene.update()
                 bpy.ops.object.mode_set(mode='EDIT')
                 self.build_armature(context, object, None, Matrix())
@@ -1043,10 +1043,10 @@ class EggGroup(EggGroupNode):
 
 
 class EggJoint(EggGroup):
-    def build_tree(self, context, parent, inv_matrix=None):
+    def build_tree(self, context, parent, inv_matrix=None, under_dart=False):
         # We don't export joints unless they have geometry below them.
         if self.any_geometry_below:
-            EggGroup.build_tree(self, context, parent, inv_matrix)
+            EggGroup.build_tree(self, context, parent, inv_matrix, under_dart)
 
     def build_armature(self, context, armature, parent, matrix):
         """ Recursively builds up an armature under a group with dart tag.
@@ -1206,7 +1206,7 @@ class EggBundle(EggTable):
         elif child.name == 'morph':
             self.morph = child
 
-    def build_tree(self, context, parent=None, inv_matrix=None):
+    def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
         if self.skeleton:
             self.action = bpy.data.actions.new(self.name)
             self.action.use_fake_user = True
