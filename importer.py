@@ -153,7 +153,7 @@ class EggContext:
         for name, vertex_ref in self.group_vertex_refs:
             vpool = self.vertex_pools[vertex_ref.pool]
             for group in vpool.groups:
-                vertex_groups = group.object.vertex_groups
+                vertex_groups = group.mesh_object.vertex_groups
                 if name in vertex_groups:
                     vertex_group = vertex_groups[name]
                 else:
@@ -926,6 +926,7 @@ class EggGroup(EggGroupNode):
         know the parent-child hierarchy and transforms. """
 
         data = None
+        self.mesh_object = None
         if self.mesh:
             data = self.mesh
             data.update(calc_edges=True, calc_tessface=True)
@@ -950,12 +951,19 @@ class EggGroup(EggGroupNode):
             if data.validate(verbose=True):
                 context.info("Corrected invalid geometry in mesh '{}'.".format(data.name))
 
-        elif self.dart and not under_dart:
+        if self.dart and not under_dart:
+            if data:
+                # We already have object data.  Move the geometry to a child
+                # object.
+                self.mesh_object = bpy.data.objects.new("", data)
             data = bpy.data.armatures.new(self.name)
 
         object = bpy.data.objects.new(self.name, data)
         object.parent = parent
         self.object = object
+
+        if object.type == 'MESH':
+            self.mesh_object = object
 
         # Let the user know if we couldn't get the name we want.
         if object.name != self.name:
@@ -983,6 +991,10 @@ class EggGroup(EggGroupNode):
         # Place it in the scene.  We need to do this before assigning game
         # properties, below.
         bpy.context.scene.objects.link(object)
+
+        if self.mesh_object and object is not self.mesh_object:
+            self.mesh_object.parent = object
+            bpy.context.scene.objects.link(self.mesh_object)
 
         # Recurse.
         for child in self.children:
@@ -1034,9 +1046,9 @@ class EggGroup(EggGroupNode):
         """ Recursively builds up an armature under a group with dart tag.
         This requires the armature to be active and in edit mode. """
 
-        if self.mesh:
+        if self.mesh_object:
             # Add an armature modifier.
-            mod = self.object.modifiers.new(armature.data.name, 'ARMATURE')
+            mod = self.mesh_object.modifiers.new(armature.data.name, 'ARMATURE')
             mod.object = armature
 
         EggGroupNode.build_armature(self, context, armature, parent, matrix)
