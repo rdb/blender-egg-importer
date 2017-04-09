@@ -62,12 +62,15 @@ Supported features:
 - Default animation pose
 - Bone animations
 - Morph targets
+- YABEE-style external references ('file' game property)
 
 Yet to do:
 - Improve performance of parser
 - Lines, patches
 - NURBS surfaces and curves
 - Level of detail
+- Ability to resolve external references
+- Support Instance groups
 
 ## Limitations
 

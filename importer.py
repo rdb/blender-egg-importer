@@ -658,6 +658,7 @@ class EggNode:
 class EggGroupNode(EggNode):
     def __init__(self):
         self.children = []
+        self.external_refs = []
 
     def begin_child(self, context, type, name, values):
         type = type.upper()
@@ -677,6 +678,8 @@ class EggGroupNode(EggNode):
             vpool = EggVertexPool(name)
             context.vertex_pools[name] = vpool
             return vpool
+        elif type == 'FILE':
+            self.external_refs.append((name, values[0]))
         elif type in ('GROUP', 'INSTANCE'):
             return EggGroup(name, parent=self)
         elif type == 'JOINT':
@@ -836,6 +839,13 @@ class EggGroup(EggGroupNode):
                 self.add_polygon(context, child, vpool)
 
         elif isinstance(child, EggGroup):
+            if type.upper() == 'INSTANCE' and not child.matrix and \
+                not child.children and len(child.external_refs) == 1:
+                # YABEE exports a single instance containing a <File> from a
+                # game property named 'file'.  Support this.
+                self.properties['file'] = child.external_refs[0][1]
+                return
+
             self.any_geometry_below |= child.any_geometry_below
             self.has_default_pose |= child.has_default_pose
 
