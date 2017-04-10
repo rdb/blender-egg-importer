@@ -36,7 +36,7 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     directory = props.StringProperty(name="Directory", options={'HIDDEN'})
     files = props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
 
-    load_external = props.BoolProperty(name="Load external references")
+    load_external = props.BoolProperty(name="Load external references", description="Loads other .egg files referenced by this file as separate scenes, and instantiates them using DupliGroups.")
 
     def execute(self, context):
         context = importer.EggContext()

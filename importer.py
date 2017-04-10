@@ -210,6 +210,7 @@ class EggContext:
             pass
 
         orig_scene = bpy.context.scene
+        orig_search_dir = self.search_dir
 
         # Please note that things may be added to self.external_groups
         # recursively.
@@ -220,7 +221,8 @@ class EggContext:
             bpy.context.screen.scene = scene
 
             # Convert the external scene.
-            path = os.path.join(self.search_dir, path)
+            path = os.path.join(orig_search_dir, path)
+            self.search_dir = os.path.dirname(path)
             root = self.read_file(path)
             root.build_tree(self)
             self.assign_vertex_groups()
@@ -230,6 +232,7 @@ class EggContext:
                 group.objects.link(obj)
 
         bpy.context.screen.scene = orig_scene
+        self.search_dir = orig_search_dir
 
 
 class EggRenderMode:
