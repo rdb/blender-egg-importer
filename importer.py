@@ -1,10 +1,11 @@
 """ This files contains classes that interpret the .egg object model and write
 out the appropriate Blender structures. """
 
-from .eggparser import parse_number
+from .eggparser import parse_egg, parse_number
 
 import sys, os
 import bpy
+import io, zlib
 from mathutils import Matrix, Vector
 from math import radians
 
@@ -41,11 +42,32 @@ class EggContext:
         self.cs_matrix = self.y_to_z_up_mat
         self.inv_cs_matrix = self.y_to_z_up_mat.inverted()
 
+        # Remember external references.
+        self.external_groups = {}
+
         # We remember all the Group/VertexRef entries, so we can assign them
         # in a separate pass.
         self.group_vertex_refs = []
 
         self.joints = {}
+
+    def read_file(self, path):
+        """ Reads an .egg file, returning a root EggGroupNode. """
+
+        if path.endswith('.pz') or path.endswith('.gz'):
+            data = zlib.decompress(open(path, 'rb').read(), 32 + 15).decode('utf-8')
+        elif not os.path.isfile(path) and not os.path.splitext(path)[1]:
+            # Implicit .egg extension.
+            data = open(path + '.egg', 'r').read()
+        else:
+            data = open(path, 'r').read()
+
+        buffer = io.StringIO(data)
+        root = EggGroupNode()
+        parse_egg(buffer, root, self)
+        buffer.close()
+
+        return root
 
     def info(self, message):
         """ Called when the importer wants to report something.  This can be
@@ -168,6 +190,46 @@ class EggContext:
 
                 if indices:
                     vertex_group.add(tuple(indices), vertex_ref.membership, 'ADD')
+
+        self.group_vertex_refs.clear()
+
+    def get_external_group(self, path):
+        """ Returns the group used for an external reference. """
+
+        if path in self.external_groups:
+            return self.external_groups[path]
+
+        group = bpy.data.groups.new(path)
+        self.external_groups[path] = group
+        return group
+
+    def load_external_references(self):
+        """ Resolves external file references. """
+
+        if not self.external_groups:
+            pass
+
+        orig_scene = bpy.context.scene
+
+        # Please note that things may be added to self.external_groups
+        # recursively.
+
+        for path, group in self.external_groups.items():
+            # Create a separate scene for this model.
+            scene = bpy.data.scenes.new(path)
+            bpy.context.screen.scene = scene
+
+            # Convert the external scene.
+            path = os.path.join(self.search_dir, path)
+            root = self.read_file(path)
+            root.build_tree(self)
+            self.assign_vertex_groups()
+
+            # Assign all objects in the loaded scene to the group.
+            for obj in scene.objects:
+                group.objects.link(obj)
+
+        bpy.context.screen.scene = orig_scene
 
 
 class EggRenderMode:
@@ -748,6 +810,7 @@ class EggGroup(EggGroupNode):
         self.shape_keys = set()
         self.materials = []
         self.dart = False
+        self.external_instance = None
 
         # Keep track of whether there is any geometry below this node.
         self.any_geometry_below = False
@@ -839,11 +902,13 @@ class EggGroup(EggGroupNode):
                 self.add_polygon(context, child, vpool)
 
         elif isinstance(child, EggGroup):
-            if type.upper() == 'INSTANCE' and not child.matrix and \
+            if type.upper() == 'INSTANCE' and (not self.matrix or not child.matrix) and \
                 not child.children and len(child.external_refs) == 1:
                 # YABEE exports a single instance containing a <File> from a
-                # game property named 'file'.  Support this.
-                self.properties['file'] = child.external_refs[0][1]
+                # game property named 'file'.  flt2egg puts a <Transform>
+                # inside the <Instance>.  We will support both.
+                ref = child.external_refs[0][1]
+                self.external_instance = (ref, child)
                 return
 
             self.any_geometry_below |= child.any_geometry_below
@@ -982,6 +1047,17 @@ class EggGroup(EggGroupNode):
         if data and data.name != self.name:
             if data.name != object.name:
                 context.warn("'{}' was renamed to '{}' due to a name conflict".format(self.name, data.name))
+
+        # Check if this group contains an external instance, such as created
+        # by YABEE or flt2egg.
+        if self.external_instance:
+            file, instance = self.external_instance
+            self.properties['file'] = file
+            if instance.matrix and not self.matrix and not self.children and data is None:
+                # We can safely copy the matrix from the child.
+                self.matrix = instance.matrix
+            object.dupli_type = 'GROUP'
+            object.dupli_group = context.get_external_group(file)
 
         if not inv_matrix:
             inv_matrix = context.inv_cs_matrix

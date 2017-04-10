@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Import Panda3D .egg models",
     "author": "rdb",
-    "version": (1, 2),
+    "version": (1, 3),
     "blender": (2, 74, 0), # Needed for normals_split_custom_set
     "location": "File > Import > Panda3D (.egg)",
     "description": "",
@@ -17,9 +17,7 @@ else:
     from . import eggparser
     from . import importer
 
-import io, zlib
 import os.path
-import zlib
 import bpy, bpy.types
 from bpy import props
 from bpy_extras.io_utils import ImportHelper
@@ -36,7 +34,9 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     filter_glob = props.StringProperty(default="*.egg;*.egg.pz;*.egg.gz", options={'HIDDEN'})
 
     directory = props.StringProperty(name="Directory", options={'HIDDEN'})
-    files = bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
+    files = props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
+
+    load_external = props.BoolProperty(name="Load external references")
 
     def execute(self, context):
         context = importer.EggContext()
@@ -48,21 +48,16 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
 
         for file in self.files:
             path = os.path.join(self.directory, file.name)
-
-            if path.endswith('.pz') or path.endswith('.gz'):
-                data = zlib.decompress(open(path, 'rb').read(), 32 + 15).decode('utf-8')
-            else:
-                data = open(path, 'r').read()
-
-            fp = io.StringIO(data)
-            root = importer.EggGroupNode()
-            eggparser.parse_egg(fp, root, context)
-            fp.close()
+            root = context.read_file(path)
             roots.append(root)
 
         for root in roots:
             root.build_tree(context)
         context.assign_vertex_groups()
+
+        if self.load_external:
+            context.load_external_references()
+
         context.final_report()
         return {'FINISHED'}
 
@@ -70,6 +65,11 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
         wm = context.window_manager
         wm.fileselect_add(self)
         return {'RUNNING_MODAL'}
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row()
+        row.prop(self, "load_external")
 
 
 def menu_func(self, context):
