@@ -746,7 +746,9 @@ class EggGroupNode(EggNode):
         elif type == 'FILE':
             self.external_refs.append((name, values[0]))
         elif type in ('GROUP', 'INSTANCE'):
-            return EggGroup(name, parent=self)
+            group = EggGroup(name, parent=self)
+            group.instance_type = (type == 'INSTANCE')
+            return group
         elif type == 'JOINT':
             joint = EggJoint(name, parent=self)
             context.joints[name] = joint
@@ -798,6 +800,7 @@ class EggGroup(EggGroupNode):
     def __init__(self, name, parent):
         EggGroupNode.__init__(self)
         self.name = name
+        self.instance_type = False
         self.properties = {}
 
         self.vertices = {}
@@ -814,10 +817,17 @@ class EggGroup(EggGroupNode):
         self.materials = []
         self.dart = False
         self.external_instance = None
+        self.has_billboard = False
+        self.has_billboard_center = False
 
         # Keep track of whether there is any geometry below this node.
         self.any_geometry_below = False
         self.has_default_pose = False
+
+    def is_instance_type(self):
+        """ Returns true if this begins a new coordinate space. """
+
+        return self.instance_type or (self.has_billboard and not self.has_billboard_center)
 
     def get_bvert(self, vert):
         # Vertices are keyed by position only, since normals and UVs are
@@ -872,6 +882,12 @@ class EggGroup(EggGroupNode):
 
         elif type == 'DEFAULTPOSE':
             return EggTransform()
+
+        elif type == 'BILLBOARD':
+            self.has_billboard = (values[0].lower() != 'none')
+
+        elif type == 'BILLBOARDCENTER':
+            self.has_billboard_center = True
 
         return EggGroupNode.begin_child(self, context, type, name, values)
 
@@ -1071,6 +1087,9 @@ class EggGroup(EggGroupNode):
             object.matrix_basis = matrix
 
             inv_matrix = matrix.inverted() * inv_matrix
+
+        if self.is_instance_type():
+            inv_matrix = context.inv_cs_matrix
 
         # The .egg format specifies vertex data in global space, so we have to
         # transform the object by its inverse matrix to compensate for that.
