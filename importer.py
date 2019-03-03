@@ -971,9 +971,9 @@ class EggGroup(EggGroupNode):
 
             if vertex.color:
                 self.have_vertex_colors = True
-                self.vertex_colors += vertex.color[:3]
+                self.vertex_colors += vertex.color
             else:
-                self.vertex_colors += (1, 1, 1)
+                self.vertex_colors += (1, 1, 1, 1)
 
             for name, uv in vertex.uv_map.items():
                 if name not in mesh.uv_layers:
