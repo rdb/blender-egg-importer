@@ -397,14 +397,12 @@ class EggMaterial:
             tex_node = bmat.node_tree.nodes.new("ShaderNodeTexImage")
             tex_node.image = texture.texture.image
             tex_node.extension = texture.texture.extension
-            tex_node.location = (tex_node.location[0] - 600.0, tex_node.location[1])
 
             uv_layer = texture.uv_name or "UVMap"
             if uv_layer not in uv_nodes:
                 uv_node = bmat.node_tree.nodes.new("ShaderNodeUVMap")
                 uv_node.uv_map = uv_layer
                 uv_nodes[uv_layer] = uv_node
-                uv_node.location = (uv_node.location[0] - 1200.0, uv_node.location[1])
             else:
                 uv_node = uv_nodes[uv_layer]
 
