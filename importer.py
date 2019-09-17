@@ -349,8 +349,6 @@ class EggMaterial:
             return self.materials[key]
 
         bmat = bpy.data.materials.new(self.name)
-        if bpy.app.version < (2, 80):
-            bmat.diffuse_intensity = 1.0
         bmat.specular_intensity = 1.0
 
         bmat.diffuse_color = self.diff
