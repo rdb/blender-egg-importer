@@ -1,15 +1,20 @@
 bl_info = {
     "name": "Import Panda3D .egg models",
     "author": "rdb",
-    "version": (1, 4),
-    "blender": (2, 74, 0), # Needed for normals_split_custom_set
+    "version": (1, 5),
+    "blender": (2, 80, 0),
     "location": "File > Import > Panda3D (.egg)",
     "description": "",
     "warning": "",
     "category": "Import-Export",
 }
 
-if "bpy" in locals():
+import bpy
+if bpy.app.version < (2, 80):
+    bl_info["blender"] = (2, 74, 0) # Needed for normals_split_custom_set
+
+
+if "loaded" in locals():
     import imp
     imp.reload(eggparser)
     imp.reload(importer)
@@ -17,8 +22,10 @@ else:
     from . import eggparser
     from . import importer
 
+loaded = True
+
 import os.path
-import bpy, bpy.types
+import bpy.types
 from bpy import props
 from bpy_extras.io_utils import ImportHelper
 
@@ -76,14 +83,20 @@ def menu_func(self, context):
     self.layout.operator(IMPORT_OT_egg.bl_idname, text="Panda3D (.egg)")
 
 def register():
-    bpy.utils.register_module(__name__)
+    bpy.utils.register_class(IMPORT_OT_egg)
 
-    bpy.types.INFO_MT_file_import.append(menu_func)
+    if bpy.app.version >= (2, 80):
+        bpy.types.TOPBAR_MT_file_import.append(menu_func)
+    else:
+        bpy.types.INFO_MT_file_import.append(menu_func)
 
 def unregister():
-    bpy.utils.unregister_module(__name__)
+    if bpy.app.version >= (2, 80):
+        bpy.types.TOPBAR_MT_file_import.remove(menu_func)
+    else:
+        bpy.types.INFO_MT_file_import.remove(menu_func)
 
-    bpy.types.INFO_MT_file_import.remove(menu_func)
+    bpy.utils.unregister_class(IMPORT_OT_egg)
 
 if __name__ == "__main__":
     register()
