@@ -408,7 +408,18 @@ class EggMaterial:
             else:
                 uv_node = uv_nodes[uv_layer]
 
-            bmat.node_tree.links.new(tex_node.inputs['Vector'], uv_node.outputs['UV'])
+            # Convert the Panda texture transform to the equivalent Blender
+            # transform.  Ignores rotation, shear, or axis remap.
+            m = texture.matrix
+            if m is not None:
+                map_node = bmat.node_tree.nodes.new("ShaderNodeMapping")
+                map_node.scale = (m[0][0], m[1][1], m[2][2])
+                map_node.translation = Vector((m[0][3], m[1][3], m[2][3]))
+                bmat.node_tree.links.new(map_node.inputs['Vector'], uv_node.outputs['UV'])
+                bmat.node_tree.links.new(tex_node.inputs['Vector'], map_node.outputs['Vector'])
+            else:
+                bmat.node_tree.links.new(tex_node.inputs['Vector'], uv_node.outputs['UV'])
+
             color = tex_node.outputs['Color']
             alpha = tex_node.outputs['Alpha']
 
