@@ -273,7 +273,7 @@ class EggMaterial:
         self.name = name
 
         self.base = [1, 1, 1, 1]
-        self.diff = [1, 1, 1, 1]
+        self.diff = None
         self.amb = [1, 1, 1, 1]
         self.emit = [0, 0, 0, 1]
         self.spec = [0, 0, 0, 1]
@@ -298,12 +298,20 @@ class EggMaterial:
             elif name == 'basea':
                 self.base[3] = value
             elif name == 'diffr':
+                if not self.diff:
+                    self.diff = [1, 1, 1, 1]
                 self.diff[0] = value
             elif name == 'diffg':
+                if not self.diff:
+                    self.diff = [1, 1, 1, 1]
                 self.diff[1] = value
             elif name == 'diffb':
+                if not self.diff:
+                    self.diff = [1, 1, 1, 1]
                 self.diff[2] = value
             elif name == 'diffa':
+                if not self.diff:
+                    self.diff = [1, 1, 1, 1]
                 self.diff[3] = value
             elif name == 'ambr':
                 self.amb[0] = value
@@ -338,20 +346,29 @@ class EggMaterial:
             elif name == 'ior':
                 self.ior = value
 
-    def _get_material_28(self, textures, color, bface, alpha):
+    def _get_material_28(self, textures, flat_color, bface, alpha):
         """ Returns the material for the indicated primitive. """
 
-        if len(textures) == 0 and self is EggPrimitive.default_material and not bface and not alpha:
+        if len(textures) == 0 and self is EggPrimitive.default_material and not bface and not alpha and flat_color and tuple(flat_color) == (1, 1, 1, 1):
             return None
 
-        key = (tuple(textures), color, bface, alpha)
+        key = (tuple(textures), flat_color, bface, alpha)
         if key in self.materials:
             return self.materials[key]
 
         bmat = bpy.data.materials.new(self.name)
         bmat.specular_intensity = 1.0
 
-        bmat.diffuse_color = self.diff
+        use_vertex_color = False
+        if self.diff:
+            bmat.diffuse_color = self.diff
+        elif flat_color:
+            bmat.diffuse_color = flat_color
+        else:
+            # There are vertex colors.  Apply via nodes, below.
+            bmat.diffuse_color = [1, 1, 1, 1]
+            use_vertex_color = True
+
         bmat.specular_color = self.spec[:3]
         if self.roughness is not None:
             bmat.roughness = self.roughness
@@ -376,13 +393,13 @@ class EggMaterial:
 
         # If we have an emission color, or any textures, we need to build up
         # a node graph.
-        if textures or any(self.emit[:3]):
-            self._make_nodes(bmat, textures)
+        if textures or any(self.emit[:3]) or use_vertex_color:
+            self._make_nodes(bmat, textures, use_vertex_color)
 
         self.materials[key] = bmat
         return bmat
 
-    def _make_nodes(self, bmat, textures):
+    def _make_nodes(self, bmat, textures, use_vertex_color):
         bmat.use_nodes = True
         bsdf = bmat.node_tree.nodes["Principled BSDF"]
         bsdf.inputs["Roughness"].default_value = bmat.roughness
@@ -390,6 +407,17 @@ class EggMaterial:
         if self.ior is not None:
             bsdf.inputs["IOR"].default_value = self.ior
         bsdf.inputs["Emission"].default_value = self.emit
+        if not any(self.spec[:3]):
+            bsdf.inputs["Specular"].default_value = 0.0
+
+        color_out = bsdf.inputs['Base Color']
+        alpha_out = bsdf.inputs['Alpha']
+
+        if use_vertex_color:
+            col_node = bmat.node_tree.nodes.new("ShaderNodeAttribute")
+            col_node.attribute_name = "Col"
+            bmat.node_tree.links.new(color_out, col_node.outputs["Color"])
+
         uv_nodes = {}
 
         # Create nodes to sample and combine the various texture stages.
@@ -449,13 +477,11 @@ class EggMaterial:
                     bmat.node_tree.links.new(color_out, color)
 
                 if has_alpha:
-                    alpha_out = bsdf.inputs['Alpha']
                     if alpha_out.is_linked:
                         bmat.node_tree.links.remove(alpha_out.links[0])
                     bmat.node_tree.links.new(alpha_out, color)
 
             if texture.envtype in ('add', 'decal', 'blend', 'modulate', 'modulate_glow', 'modulate_gloss'):
-                color_out = bsdf.inputs['Base Color']
                 if has_color and color_out.is_linked:
                     # We already have something mapped; add a mixing node.
                     mix_node = bmat.node_tree.nodes.new("ShaderNodeMixRGB")
@@ -547,13 +573,13 @@ class EggMaterial:
 
             node.location = (x, -300.0 * (row - 1))
 
-    def _get_material_27(self, textures, color, bface, alpha):
+    def _get_material_27(self, textures, flat_color, bface, alpha):
         """ Returns the material for the indicated primitive. """
 
         if len(textures) == 0 and self is EggPrimitive.default_material and not bface and not alpha:
             return None
 
-        key = (tuple(textures), color, bface, alpha)
+        key = (tuple(textures), flat_color, bface, alpha)
         if key in self.materials:
             return self.materials[key]
 
@@ -562,12 +588,17 @@ class EggMaterial:
         bmat.specular_intensity = 1.0
         bmat.specular_hardness = self.shininess * 2
 
-        if not any(self.spec) and not any(self.diff) and not any(self.amb):
+        if not any(self.spec) and self.diff and not any(self.diff) and not any(self.amb):
             # This is YABEE's way of making a shadeless material.
             bmat.use_shadeless = True
             bmat.diffuse_color = self.emit[:3]
         else:
-            bmat.diffuse_color = self.diff[:3]
+            if self.diff:
+                bmat.diffuse_color = self.diff[:3]
+            elif flat_color:
+                bmat.diffuse_color = flat_color[:3]
+            else:
+                bmat.diffuse_color = [1, 1, 1]
             bmat.specular_color = self.spec[:3]
             bmat.specular_alpha = self.spec[3]
 
@@ -845,7 +876,7 @@ class EggPrimitive:
 
     def __init__(self):
         self.material = EggPrimitive.default_material
-        self.color = (1, 1, 1, 1)
+        self.color = None
         self.normal = None
         self.bface = False
         self.alpha = None
@@ -1256,7 +1287,11 @@ class EggGroup(EggGroupNode):
                     uv_texture.data[poly_index].image = texture.texture.image
 
         # Check if we already have a material for this combination.
-        bmat = prim.material.get_material(prim.textures, prim.color, prim.bface, prim.alpha)
+        if self.have_vertex_colors:
+            flat_color = None
+        else:
+            flat_color = prim.color or (1, 1, 1, 1)
+        bmat = prim.material.get_material(prim.textures, flat_color, prim.bface, prim.alpha)
         if bmat in self.materials:
             index = self.materials.index(bmat)
         else:
