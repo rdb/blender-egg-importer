@@ -1209,11 +1209,18 @@ class EggGroup(EggGroupNode):
             else:
                 self.normals.append(vertex_normal or poly_normal)
 
-            if vertex.color:
-                self.have_vertex_colors = True
-                self.vertex_colors += vertex.color
+            if bpy.app.version >= (2, 79, 7):
+                if vertex.color:
+                    self.have_vertex_colors = True
+                    self.vertex_colors += vertex.color
+                else:
+                    self.vertex_colors += (1, 1, 1, 1)
             else:
-                self.vertex_colors += (1, 1, 1, 1)
+                if vertex.color:
+                    self.have_vertex_colors = True
+                    self.vertex_colors += vertex.color[:3]
+                else:
+                    self.vertex_colors += (1, 1, 1)
 
             for name, uv in vertex.uv_map.items():
                 if name not in mesh.uv_layers:
