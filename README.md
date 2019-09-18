@@ -110,6 +110,7 @@ Yet to do:
 - NURBS surfaces and curves
 - Level of detail
 - Support recursive external references
+- Translate texture combine modes to material nodes
 
 ## Limitations
 

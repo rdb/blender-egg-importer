@@ -398,6 +398,26 @@ class EggMaterial:
             tex_node.image = texture.texture.image
             tex_node.extension = texture.texture.extension
 
+            if texture.minfilter and texture.minfilter.startswith("nearest"):
+                tex_node.interpolation = "Closest"
+
+            # Determine whether the texture contributes to color and alpha.
+            has_color = texture.format != 'alpha'
+            if texture.format == 'alpha':
+                has_alpha = True
+            elif texture.format in ('red', 'green', 'blue', 'luminance', 'rgb', 'rgb12', 'rgb8', 'rgb5', 'rgb332'):
+                has_alpha = False
+            elif texture.texture.image.channels < 4:
+                has_alpha = False
+            else:
+                # Determine whether the image has an alpha channel.
+                has_alpha = False
+                for alpha in tuple(texture.texture.image.pixels)[3::4]:
+                    if alpha != 1.0:
+                        has_alpha = True
+                        break
+
+            # Create an UVMap node, if none already exists for this UV set.
             uv_layer = texture.uv_name or "UVMap"
             if uv_layer not in uv_nodes:
                 uv_node = bmat.node_tree.nodes.new("ShaderNodeUVMap")
@@ -421,15 +441,28 @@ class EggMaterial:
             color = tex_node.outputs['Color']
             alpha = tex_node.outputs['Alpha']
 
+            if texture.envtype == 'replace':
+                if has_color:
+                    color_out = bsdf.inputs['Base Color']
+                    if color_out.is_linked:
+                        bmat.node_tree.links.remove(color_out.links[0])
+                    bmat.node_tree.links.new(color_out, color)
+
+                if has_alpha:
+                    alpha_out = bsdf.inputs['Alpha']
+                    if alpha_out.is_linked:
+                        bmat.node_tree.links.remove(alpha_out.links[0])
+                    bmat.node_tree.links.new(alpha_out, color)
+
             if texture.envtype in ('add', 'decal', 'blend', 'modulate', 'modulate_glow', 'modulate_gloss'):
-                base_color = bsdf.inputs['Base Color']
-                if base_color.is_linked:
+                color_out = bsdf.inputs['Base Color']
+                if has_color and color_out.is_linked:
                     # We already have something mapped; add a mixing node.
                     mix_node = bmat.node_tree.nodes.new("ShaderNodeMixRGB")
                     mix_node.inputs["Fac"].default_value = 1.0
 
-                    old_socket = base_color.links[0].from_socket
-                    bmat.node_tree.links.remove(base_color.links[0])
+                    old_socket = color_out.links[0].from_socket
+                    bmat.node_tree.links.remove(color_out.links[0])
                     bmat.node_tree.links.new(old_socket, mix_node.inputs['Color1'])
 
                     if texture.envtype == 'add':
@@ -449,7 +482,24 @@ class EggMaterial:
 
                     color = mix_node.outputs['Color']
 
-                bmat.node_tree.links.new(base_color, color)
+                if has_color:
+                    bmat.node_tree.links.new(color_out, color)
+
+                if has_alpha and texture.envtype != 'decal':
+                    alpha_out = bsdf.inputs['Alpha']
+                    if alpha_out.is_linked:
+                        # Add a node to multiply the alpha values.
+                        mul_node = bmat.node_tree.nodes.new("ShaderNodeMath")
+                        mul_node.operation = 'MULTIPLY'
+
+                        old_socket = alpha_out.links[0].from_socket
+                        bmat.node_tree.links.remove(alpha_out.links[0])
+                        bmat.node_tree.links.new(old_socket, mul_node.inputs[0])
+                        bmat.node_tree.links.new(alpha, mul_node.inputs[1])
+
+                        alpha = mul_node.outputs['Value']
+
+                    bmat.node_tree.links.new(alpha_out, alpha)
 
             if texture.envtype in ('normal', 'normal_height', 'normal_gloss'):
                 bmat.node_tree.links.new(bsdf.inputs['Normal'], color)
@@ -585,6 +635,7 @@ class EggTexture:
     def __init__(self, name, image):
         self.texture = bpy.data.textures.new(name, 'IMAGE')
         self.texture.image = image
+        self.format = None
         self.envtype = 'modulate'
         self.uv_name = None
         self.matrix = None
@@ -592,6 +643,8 @@ class EggTexture:
         self.blend = None
         self.warned_vpools = set()
         self.color = [0, 0, 0, 1]
+        self.minfilter = None
+        self.magfilter = None
 
     def begin_child(self, context, type, name, values):
         type = type.upper()
@@ -608,13 +661,17 @@ class EggTexture:
                 elif value in ('border_color', 'border-color'):
                     self.texture.extension = 'CLIP'
 
+            elif name == 'format':
+                self.format = values[0].lower().replace('-', '_')
+
             elif name == 'envtype':
                 self.envtype = values[0].lower().replace('-', '_')
                 if self.envtype == 'normal':
                     self.texture.use_normal_map = True
 
             elif name == 'minfilter':
-                if 'mipmap' in values[0].lower():
+                self.minfilter = values[0].lower()
+                if 'mipmap' in self.minfilter:
                     self.texture.use_mipmap = True
 
             elif name == 'alpha':
