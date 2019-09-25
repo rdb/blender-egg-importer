@@ -346,13 +346,28 @@ class EggMaterial:
             elif name == 'ior':
                 self.ior = value
 
-    def _get_material_28(self, textures, flat_color, bface, alpha):
+    def _get_material_28(self, group, prim):
         """ Returns the material for the indicated primitive. """
 
-        if len(textures) == 0 and self is EggPrimitive.default_material and not bface and not alpha and flat_color and tuple(flat_color) == (1, 1, 1, 1):
-            return None
+        bface = prim.bface
+        textures = prim.textures
+        alpha = prim.alpha_mode
 
-        key = (tuple(textures), flat_color, bface, alpha)
+        if group.have_vertex_colors:
+            flat_color = None
+        else:
+            flat_color = prim.color or (1, 1, 1, 1)
+
+            if len(textures) == 0 and self is EggPrimitive.default_material \
+                and not bface \
+                and not alpha \
+                and tuple(flat_color) == (1, 1, 1, 1) \
+                and not group.blend_mode:
+                return None
+
+        # Uniquify equivalent materials.
+        key = (tuple(textures), flat_color, bface, alpha, group.blend_mode,
+               group.blend_operands[0], group.blend_operands[1])
         if key in self.materials:
             return self.materials[key]
 
@@ -378,7 +393,12 @@ class EggMaterial:
         if self.ior is not None:
             bmat.ior = self.ior
 
-        if alpha:
+        if (group.blend_mode in ('add', 'subtract') and group.blend_operands == ['fbuffer_color', 'zero']) or \
+           (group.blend_mode in ('add', 'inv_subtract') and group.blend_operands == ['zero', 'incoming_color']):
+            bmat.blend_method = 'MULTIPLY'
+        elif group.blend_mode == 'add':
+            bmat.blend_method = 'ADD'
+        elif alpha:
             alpha = alpha.lower()
             if alpha == 'off':
                 bmat.blend_method = 'OPAQUE'
@@ -573,8 +593,17 @@ class EggMaterial:
 
             node.location = (x, -300.0 * (row - 1))
 
-    def _get_material_27(self, textures, flat_color, bface, alpha):
+    def _get_material_27(self, group, prim):
         """ Returns the material for the indicated primitive. """
+
+        if group.have_vertex_colors:
+            flat_color = None
+        else:
+            flat_color = prim.color or (1, 1, 1, 1)
+
+        bface = prim.bface
+        textures = prim.textures
+        alpha = prim.alpha_mode
 
         if len(textures) == 0 and self is EggPrimitive.default_material and not bface and not alpha:
             return None
@@ -610,7 +639,9 @@ class EggMaterial:
             if any(bmat.diffuse_color):
                 bmat.emit = sum(self.emit[:3]) / sum(bmat.diffuse_color)
 
-        if alpha:
+        if group.blend_mode and group.blend_mode == 'add':
+            bmat.game_settings.alpha_blend = 'ADD'
+        elif alpha:
             alpha = alpha.lower()
             if alpha == 'off':
                 bmat.game_settings.alpha_blend = 'OPAQUE'
@@ -870,7 +901,7 @@ class EggVertexPool:
 
 
 class EggPrimitive:
-    __slots__ = 'indices', 'pool', 'material', 'textures', 'normal', 'color', 'bface', 'alpha', 'visibility'
+    __slots__ = 'indices', 'pool', 'material', 'textures', 'normal', 'color', 'bface', 'alpha_mode', 'visibility'
 
     default_material = EggMaterial("default")
 
@@ -879,7 +910,7 @@ class EggPrimitive:
         self.color = None
         self.normal = None
         self.bface = False
-        self.alpha = None
+        self.alpha_mode = None
         self.visibility = None
         self.textures = []
 
@@ -895,6 +926,9 @@ class EggPrimitive:
 
         elif type == 'SCALAR' or type == 'CHAR*':
             name = name.lower()
+
+            if name == 'alpha':
+                self.alpha_mode = values[0].lower().replace('-', '_')
 
         elif type == 'TREF':
             self.textures.append(context.textures[values[0]])
@@ -937,7 +971,7 @@ class EggTriangleStrip(EggPrimitive):
                 prim.color = self.color
                 prim.normal = self.normal
                 prim.bface = self.bface
-                prim.alpha = self.alpha
+                prim.alpha_mode = self.alpha_mode
                 prim.visibility = self.visibility
                 prim.textures = self.textures
                 prevprev = prev
@@ -973,7 +1007,7 @@ class EggTriangleFan(EggPrimitive):
                 prim.color = self.color
                 prim.normal = self.normal
                 prim.bface = self.bface
-                prim.alpha = self.alpha
+                prim.alpha_mode = self.alpha_mode
                 prim.visibility = self.visibility
                 prim.textures = self.textures
                 prev = index
@@ -1091,6 +1125,15 @@ class EggGroup(EggGroupNode):
         self.has_billboard = False
         self.has_billboard_center = False
 
+        if isinstance(parent, EggGroup):
+            self.blend_mode = parent.blend_mode
+            self.blend_operands = [*parent.blend_operands]
+            self.blend_color = [*parent.blend_color]
+        else:
+            self.blend_mode = None
+            self.blend_operands = ["one", "one"]
+            self.blend_color = [0, 0, 0, 0]
+
         # Keep track of whether there is any geometry below this node.
         self.any_geometry_below = False
         self.has_default_pose = False
@@ -1126,9 +1169,23 @@ class EggGroup(EggGroupNode):
         if type in ('SCALAR', 'CHAR*'):
             name = name.lower().replace('_', '-')
 
-            # YABEE recognizes these scalars as game properties.
             if name in ('collide-mask', 'from-collide-mask', 'into-collide-mask', 'bin', 'draw-order'):
+                # YABEE recognizes these scalars as game properties.
                 self.properties[name] = values[0]
+            elif name == 'blend':
+                self.blend_mode = values[0].lower().replace('-', '_')
+            elif name == 'blendop-a':
+                self.blend_operands[0] = values[0].lower().replace('-', '_')
+            elif name == 'blendop-b':
+                self.blend_operands[1] = values[0].lower().replace('-', '_')
+            elif name == 'blendr':
+                self.blend_color[0] = parse_number(values[0])
+            elif name == 'blendg':
+                self.blend_color[1] = parse_number(values[0])
+            elif name == 'blendb':
+                self.blend_color[2] = parse_number(values[0])
+            elif name == 'blenda':
+                self.blend_color[3] = parse_number(values[0])
 
         elif type in ('COLLIDE', 'OBJECTTYPE'):
             self.properties[orig_type] = values[0]
@@ -1287,11 +1344,7 @@ class EggGroup(EggGroupNode):
                     uv_texture.data[poly_index].image = texture.texture.image
 
         # Check if we already have a material for this combination.
-        if self.have_vertex_colors:
-            flat_color = None
-        else:
-            flat_color = prim.color or (1, 1, 1, 1)
-        bmat = prim.material.get_material(prim.textures, flat_color, prim.bface, prim.alpha)
+        bmat = prim.material.get_material(self, prim)
         if bmat in self.materials:
             index = self.materials.index(bmat)
         else:
