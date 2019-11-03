@@ -1113,6 +1113,7 @@ class EggGroup(EggGroupNode):
         self.matrix = None
         self.default_pose = None
         self.mesh = None
+        self.mesh_object = None
         self.first_vertex = 0
         self.normals = []
         self.have_normals = False
