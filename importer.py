@@ -764,7 +764,7 @@ class EggTexture:
     def end_child(self, context, type, name, child):
         if isinstance(child, EggTransform):
             if self.matrix is not None:
-                self.matrix *= child.matrix
+                self.matrix = matmul(self.matrix, child.matrix)
             else:
                 self.matrix = child.matrix
 
@@ -1230,7 +1230,7 @@ class EggGroup(EggGroupNode):
                     self.default_pose = child.matrix
             else:
                 if self.matrix is not None:
-                    self.matrix *= child.matrix
+                    self.matrix = matmul(self.matrix, child.matrix)
                 else:
                     self.matrix = child.matrix
 
@@ -1459,9 +1459,14 @@ class EggGroup(EggGroupNode):
 
         # Awkward, but it seems there's no other way to set a game property
         # or create bones or add shape keys.
-        if (self.properties or self.dart or self.shape_keys) and bpy.app.version < (2, 80):
-            active = bpy.context.scene.objects.active
-            bpy.context.scene.objects.active = object
+        if self.properties or self.dart or self.shape_keys:
+            if bpy.app.version >= (2, 80):
+                active = bpy.context.view_layer.objects.active
+                bpy.context.view_layer.objects.active = object
+            else:
+                active = bpy.context.scene.objects.active
+                bpy.context.scene.objects.active = object
+
             for name, value in self.properties.items():
                 bpy.ops.object.game_property_new(type='STRING', name=name)
                 object.game.properties[name].value = value
@@ -1495,7 +1500,10 @@ class EggGroup(EggGroupNode):
                 if self.has_default_pose:
                     self.apply_default_pose(context, object.pose)
 
-            bpy.context.scene.objects.active = active
+            if bpy.app.version >= (2, 80):
+                bpy.context.view_layer.objects.active = active
+            else:
+                bpy.context.scene.objects.active = active
 
         return object
 
@@ -1522,7 +1530,7 @@ class EggJoint(EggGroup):
         This requires the armature to be active and in edit mode. """
 
         if self.matrix:
-            matrix *= context.transform_matrix(self.matrix)
+            matrix = matmul(matrix, context.transform_matrix(self.matrix))
 
         # Blender has a concept of "bone length", but Panda does not.  This
         # means we have to guess the bone length if we want sightly armatures.
@@ -1771,9 +1779,9 @@ class EggBundle(EggTable):
             matrices[i] = context.transform_matrix(matmul(joint_matrix.inverted(), m))
 
         if 'x' in channels or 'y' in channels or 'z' in channels:
-            x_curve = fcurves.new(prefix + 'location', 0)
-            y_curve = fcurves.new(prefix + 'location', 1)
-            z_curve = fcurves.new(prefix + 'location', 2)
+            x_curve = fcurves.new(prefix + 'location', index=0)
+            y_curve = fcurves.new(prefix + 'location', index=1)
+            z_curve = fcurves.new(prefix + 'location', index=2)
             x_curve.keyframe_points.add(num_frames)
             y_curve.keyframe_points.add(num_frames)
             z_curve.keyframe_points.add(num_frames)
@@ -1789,10 +1797,10 @@ class EggBundle(EggTable):
             z_curve.update()
 
         if 'h' in channels or 'p' in channels or 'r' in channels:
-            w_curve = fcurves.new(prefix + 'rotation_quaternion', 0)
-            x_curve = fcurves.new(prefix + 'rotation_quaternion', 1)
-            y_curve = fcurves.new(prefix + 'rotation_quaternion', 2)
-            z_curve = fcurves.new(prefix + 'rotation_quaternion', 3)
+            w_curve = fcurves.new(prefix + 'rotation_quaternion', index=0)
+            x_curve = fcurves.new(prefix + 'rotation_quaternion', index=1)
+            y_curve = fcurves.new(prefix + 'rotation_quaternion', index=2)
+            z_curve = fcurves.new(prefix + 'rotation_quaternion', index=3)
             w_curve.keyframe_points.add(num_frames)
             x_curve.keyframe_points.add(num_frames)
             y_curve.keyframe_points.add(num_frames)
@@ -1811,9 +1819,9 @@ class EggBundle(EggTable):
             z_curve.update()
 
         if 'i' in channels or 'j' in channels or 'k' in channels:
-            x_curve = fcurves.new(prefix + 'scale', 0)
-            y_curve = fcurves.new(prefix + 'scale', 1)
-            z_curve = fcurves.new(prefix + 'scale', 2)
+            x_curve = fcurves.new(prefix + 'scale', index=0)
+            y_curve = fcurves.new(prefix + 'scale', index=1)
+            z_curve = fcurves.new(prefix + 'scale', index=2)
             x_curve.keyframe_points.add(num_frames)
             y_curve.keyframe_points.add(num_frames)
             z_curve.keyframe_points.add(num_frames)
@@ -1832,7 +1840,7 @@ class EggBundle(EggTable):
         """ Adds the curve for a morph target to this bundle's action. """
 
         fcurves = action.fcurves
-        curve = fcurves.new('key_blocks["{}"].value'.format(data.name), 0)
+        curve = fcurves.new('key_blocks["{}"].value'.format(data.name), index=0)
         keyframe_points = curve.keyframe_points
         keyframe_points.add(len(data.values))
 
