@@ -1363,7 +1363,9 @@ class EggGroup(EggGroupNode):
         self.mesh_object = None
         if self.mesh:
             data = self.mesh
-            if bpy.app.version >= (2, 80):
+            if bpy.app.version >= (2, 81):
+                data.update(calc_edges=True)
+            elif bpy.app.version >= (2, 80):
                 data.update(calc_edges=True, calc_loop_triangles=True)
             else:
                 data.update(calc_edges=True, calc_tessface=True)
