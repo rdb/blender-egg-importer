@@ -1467,9 +1467,10 @@ class EggGroup(EggGroupNode):
                 active = bpy.context.scene.objects.active
                 bpy.context.scene.objects.active = object
 
-            for name, value in self.properties.items():
-                bpy.ops.object.game_property_new(type='STRING', name=name)
-                object.game.properties[name].value = value
+            if bpy.app.version < (2, 80):
+                for name, value in self.properties.items():
+                    bpy.ops.object.game_property_new(type='STRING', name=name)
+                    object.game.properties[name].value = value
 
             if self.shape_keys:
                 # Add the basis key first.
