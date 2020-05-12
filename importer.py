@@ -479,8 +479,12 @@ class EggMaterial:
             m = texture.matrix
             if m is not None:
                 map_node = bmat.node_tree.nodes.new("ShaderNodeMapping")
-                map_node.scale = (m[0][0], m[1][1], m[2][2])
-                map_node.translation = Vector((m[0][3], m[1][3], m[2][3]))
+                if bpy.app.version >= (2, 81):
+                    map_node.inputs['Scale'].default_value = (m[0][0], m[1][1], m[2][2])
+                    map_node.inputs['Location'].default_value = Vector((m[0][3], m[1][3], m[2][3]))
+                else:
+                    map_node.scale = (m[0][0], m[1][1], m[2][2])
+                    map_node.translation = Vector((m[0][3], m[1][3], m[2][3]))
                 bmat.node_tree.links.new(map_node.inputs['Vector'], uv_node.outputs['UV'])
                 bmat.node_tree.links.new(tex_node.inputs['Vector'], map_node.outputs['Vector'])
             else:
