@@ -1778,8 +1778,12 @@ class EggBundle(EggTable):
                     matrices[i] = matmul(Matrix.Translation(v), matrices[i])
 
         # Multiply out the joint transform.
-        for i, m in enumerate(matrices):
-            matrices[i] = context.transform_matrix(matmul(joint_matrix.inverted(), m))
+        if joint_matrix:
+            for i, m in enumerate(matrices):
+                matrices[i] = context.transform_matrix(matmul(joint_matrix.inverted(), m))
+        else:
+            for i, m in enumerate(matrices):
+                matrices[i] = context.transform_matrix(m)
 
         if 'x' in channels or 'y' in channels or 'z' in channels:
             x_curve = fcurves.new(prefix + 'location', index=0)
