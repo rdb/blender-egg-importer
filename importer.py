@@ -1512,6 +1512,11 @@ class EggGroup(EggGroupNode):
             else:
                 bpy.context.scene.objects.active = active
 
+        if bpy.app.version >= (2, 80):
+            object.select_set(True)
+        else:
+            object.select = True
+
         return object
 
     def build_armature(self, context, armature, parent, matrix):
