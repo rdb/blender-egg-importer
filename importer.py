@@ -59,6 +59,8 @@ class EggContext:
         self.group_vertex_refs = []
 
         self.joints = {}
+        self.bundle_actions = {}
+        self.character_objects = {}
 
     def read_file(self, path):
         """ Reads an .egg file, returning a root EggGroupNode. """
@@ -271,6 +273,15 @@ class EggContext:
 
         bpy.context.screen.scene = orig_scene
         self.search_dir = orig_search_dir
+
+    def auto_bind(self):
+        """ Automatically binds animations to actors. """
+
+        for name, object in self.character_objects.items():
+            if name in self.bundle_actions:
+                if not object.animation_data:
+                    object.animation_data_create()
+                object.animation_data.action = self.bundle_actions[name]
 
 
 class EggRenderMode:
@@ -1441,6 +1452,9 @@ class EggGroup(EggGroupNode):
         object.parent = parent
         self.object = object
 
+        if self.dart and not under_dart:
+            context.character_objects[self.name] = object
+
         if object.type == 'MESH':
             self.mesh_object = object
 
@@ -1734,6 +1748,9 @@ class EggBundle(EggTable):
         if self.skeleton:
             self.action = bpy.data.actions.new(self.name)
             self.action.use_fake_user = True
+
+            if self.name:
+                context.bundle_actions[self.name] = self.action
 
             self.skeleton.build_animations(context, self)
 

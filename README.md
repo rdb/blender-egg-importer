@@ -35,8 +35,9 @@ with all of its animations in the same import run.  If the animation exists in
 a separate egg file, this means that the model file and all of its animation
 files will need to be selected in the file selector dialog.
 
-Animations are not automatically bound to their corresponding armature.  To
-see an imported animation, you will need to select the armature, go to the
+Animations are not automatically bound to their corresponding armature, except
+if they have the exact same name and the "Auto bind" option has been checked.
+To see an imported animation, you will need to select the armature, go to the
 Dope Sheet window, bring up the Action Editor, and select the appropriate
 action.
 

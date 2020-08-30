@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Import Panda3D .egg models",
     "author": "rdb",
-    "version": (1, 9),
+    "version": (2, 0),
     "blender": (2, 80, 0),
     "location": "File > Import > Panda3D (.egg)",
     "description": "",
@@ -44,6 +44,7 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     files = props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
 
     load_external = props.BoolProperty(name="Load external references", description="Loads other .egg files referenced by this file as separate scenes, and instantiates them using DupliGroups.")
+    auto_bind = props.BoolProperty(name="Auto bind", default=True, description="Automatically tries to bind actions to armatures.")
 
     def execute(self, context):
         context = importer.EggContext()
@@ -65,6 +66,9 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
         if self.load_external:
             context.load_external_references()
 
+        if self.auto_bind:
+            context.auto_bind()
+
         context.final_report()
         return {'FINISHED'}
 
@@ -77,6 +81,8 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
         layout = self.layout
         row = layout.row()
         row.prop(self, "load_external")
+        row = layout.row()
+        row.prop(self, "auto_bind")
 
 
 def menu_func(self, context):
