@@ -1753,6 +1753,10 @@ class EggBundle(EggTable):
     def add_curves(self, context, name, data):
         """ Adds the curves for the given joint from the given <Xfm$Anim>. """
 
+        if name not in context.joints:
+            context.warn("Ignoring animation targeting non-existent joint {}".format(name))
+            return
+
         fcurves = self.action.fcurves
         prefix = 'pose.bones["{}"].'.format(name)
 
