@@ -1291,6 +1291,14 @@ class EggGroup(EggGroupNode):
                 if self.mesh is None:
                     self.mesh = bpy.data.meshes.new(self.name)
 
+                    if self.mesh.name != self.name:
+                        # Is the conflicting one an orphan?  Remove it then, so
+                        # that we can claim the name.
+                        other = bpy.data.meshes[self.name]
+                        if other.users == 0 and not other.use_fake_user:
+                            bpy.data.meshes.remove(other)
+                            self.mesh.name = self.name
+
                 if hasattr(child, 'components'):
                     for component in child.components:
                         self.add_polygon(context, component, vpool)
