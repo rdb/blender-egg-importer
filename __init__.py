@@ -47,9 +47,9 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         context = importer.EggContext()
-        context.info = lambda msg: self.report({'INFO'}, msg)
-        context.warn = lambda msg: self.report({'WARNING'}, msg)
-        context.error = lambda msg: self.report({'ERROR'}, msg)
+        context.info = lambda msg: self.report({'INFO'}, context.prefix_message(msg))
+        context.warn = lambda msg: self.report({'WARNING'}, context.prefix_message(msg))
+        context.error = lambda msg: self.report({'ERROR'}, context.prefix_message(msg))
         context.search_dir = self.directory
         roots = []
 

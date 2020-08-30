@@ -38,6 +38,8 @@ class EggContext:
         self.textures = {}
         self.search_dir = None
 
+        self.current_file = None
+
         self.duplicate_faces = 0
         self.degenerate_faces = 0
 
@@ -71,10 +73,39 @@ class EggContext:
 
         buffer = io.StringIO(data)
         root = EggGroupNode()
-        parse_egg(buffer, root, self)
+        self.current_file = buffer
+        try:
+            parse_egg(buffer, root, self)
+        except Exception as ex:
+            lineno = self.get_current_lineno()
+            self.current_file = None
+            msg = "Encountered %s at line %d of %s: %s" % (type(ex).__name__, lineno, os.path.basename(path), ex)
+            print(msg, file=sys.stderr)
+            self.error(msg)
+            raise
+        finally:
+            self.current_file = None
         buffer.close()
 
         return root
+
+    def get_current_lineno(self):
+        """ Returns the current line number. """
+
+        if self.current_file:
+            charno = self.current_file.tell()
+            lineno = self.current_file.getvalue()[:charno].count('\n') + 1
+            return lineno
+
+    def prefix_message(self, msg):
+        """ Returns a formatted error message, possibly prefixed with line
+        number. """
+
+        lineno = self.get_current_lineno()
+        if lineno:
+            msg = "At line %d: %s" % (lineno, msg)
+
+        return msg
 
     def info(self, message):
         """ Called when the importer wants to report something.  This can be
