@@ -948,6 +948,7 @@ class EggPrimitive:
         self.alpha_mode = None
         self.visibility = None
         self.textures = []
+        self.pool = None
 
     def begin_child(self, context, type, name, values):
         type = type.upper()
@@ -1272,17 +1273,20 @@ class EggGroup(EggGroupNode):
         elif isinstance(child, EggPrimitive):
             self.any_geometry_below = True
 
-            vpool = context.vertex_pools[child.pool]
-            vpool.groups.add(self)
+            if child.pool:
+                vpool = context.vertex_pools[child.pool]
+                vpool.groups.add(self)
 
-            if self.mesh is None:
-                self.mesh = bpy.data.meshes.new(self.name)
+                if self.mesh is None:
+                    self.mesh = bpy.data.meshes.new(self.name)
 
-            if hasattr(child, 'components'):
-                for component in child.components:
-                    self.add_polygon(context, component, vpool)
+                if hasattr(child, 'components'):
+                    for component in child.components:
+                        self.add_polygon(context, component, vpool)
+                else:
+                    self.add_polygon(context, child, vpool)
             else:
-                self.add_polygon(context, child, vpool)
+                context.warn("Ignoring primitive without pool reference")
 
         elif isinstance(child, EggGroup):
             if type.upper() == 'INSTANCE' and (not self.matrix or not child.matrix) and \
