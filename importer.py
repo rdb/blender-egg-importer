@@ -495,7 +495,7 @@ class EggMaterial:
             has_color = texture.format != 'alpha'
             if texture.format == 'alpha':
                 has_alpha = True
-            elif texture.format in ('red', 'green', 'blue', 'luminance', 'rgb', 'rgb12', 'rgb8', 'rgb5', 'rgb332'):
+            elif texture.format in ('red', 'green', 'blue', 'luminance', 'rgb', 'rgb12', 'rgb8', 'rgb5', 'rgb332', 'srgb'):
                 has_alpha = False
             elif texture.texture.image.channels < 4:
                 has_alpha = False
@@ -774,8 +774,9 @@ class EggTexture:
 
             elif name == 'envtype':
                 self.envtype = values[0].lower().replace('-', '_')
-                if self.envtype == 'normal':
+                if self.envtype in ('normal', 'normal_height', 'normal_gloss'):
                     self.texture.use_normal_map = True
+                    self.texture.image.colorspace_settings.name = 'Non-Color'
 
             elif name == 'minfilter':
                 self.minfilter = values[0].lower()
