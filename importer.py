@@ -1292,7 +1292,8 @@ class EggGroup(EggGroupNode):
                 if self.mesh is None:
                     self.mesh = bpy.data.meshes.new(self.name)
 
-                    if self.mesh.name != self.name:
+                    if self.name and self.mesh.name != self.name and \
+                       self.name in bpy.data.meshes:
                         # Is the conflicting one an orphan?  Remove it then, so
                         # that we can claim the name.
                         other = bpy.data.meshes[self.name]
