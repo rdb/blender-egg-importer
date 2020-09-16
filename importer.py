@@ -1290,7 +1290,10 @@ class EggGroup(EggGroupNode):
                 vpool.groups.add(self)
 
                 if self.mesh is None:
+                    # Assign use_fake_user to keep it alive until it has been
+                    # assigned to an object.
                     self.mesh = bpy.data.meshes.new(self.name)
+                    self.mesh.use_fake_user = True
 
                     if self.name and self.mesh.name != self.name and \
                        self.name in bpy.data.meshes:
@@ -1467,6 +1470,7 @@ class EggGroup(EggGroupNode):
 
         if object.type == 'MESH':
             self.mesh_object = object
+            self.mesh.use_fake_user = False
 
         # Let the user know if we couldn't get the name we want.
         if object.name != self.name:
