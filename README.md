@@ -94,6 +94,7 @@ Supported features:
 - All transform types
 - Materials
 - Textures
+- Multitexture modes (modulate, add, decal, blend, normal, glow, gloss, etc.)
 - Tags (as game properties)
 - Collide and ObjectType (as game properties)
 - Collision masks (as game properties)

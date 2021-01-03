@@ -495,7 +495,7 @@ class EggMaterial:
             has_color = texture.format != 'alpha'
             if texture.format == 'alpha':
                 has_alpha = True
-            elif texture.format in ('red', 'green', 'blue', 'luminance', 'rgb', 'rgb12', 'rgb8', 'rgb5', 'rgb332', 'srgb'):
+            elif texture.format in ('red', 'green', 'blue', 'luminance', 'sluminance', 'rgb', 'rgb12', 'rgb8', 'rgb5', 'rgb332', 'srgb'):
                 has_alpha = False
             elif texture.texture.image.channels < 4:
                 has_alpha = False
@@ -598,6 +598,46 @@ class EggMaterial:
 
             if texture.envtype in ('gloss', 'modulate_gloss', 'normal_gloss'):
                 bmat.node_tree.links.new(bsdf.inputs['Specular'], alpha)
+
+            if texture.envtype in ('glow', 'modulate_glow'):
+                bmat.node_tree.links.new(bsdf.inputs['Emission Strength'], alpha)
+
+            if texture.envtype == 'emission':
+                # Multiply in the emission color, if we have one.
+                if self.emit and tuple(self.emit[:3]) != (1, 1, 1):
+                    mul_node = bmat.node_tree.nodes.new('ShaderNodeMixRGB')
+                    mul_node.blend_type = 'MULTIPLY'
+                    mul_node.inputs['Fac'].default_value = 1.0
+                    mul_node.inputs['Color2'].default_value = self.emit
+
+                    bmat.node_tree.links.new(mul_node.inputs['Color1'], color)
+                    bmat.node_tree.links.new(bsdf.inputs['Emission'], mul_node.outputs[0])
+                else:
+                    bmat.node_tree.links.new(bsdf.inputs['Emission'], mul_node.outputs[0])
+
+            if texture.envtype == 'selector' and \
+               (bmat.metallic != 0.0 or bmat.roughness is None or bmat.roughness != 0.0):
+                # This slot is, by convention, used for metallic-roughness.
+                sep_node = bmat.node_tree.nodes.new('ShaderNodeSeparateRGB')
+                bmat.node_tree.links.new(sep_node.inputs[0], color)
+
+                if bmat.metallic != 1.0:
+                    mul_node = bmat.node_tree.nodes.new("ShaderNodeMath")
+                    mul_node.operation = 'MULTIPLY'
+                    mul_node.inputs[1].default_value = bmat.metallic
+                    bmat.node_tree.links.new(mul_node.inputs[0], sep_node.outputs['B'])
+                    bmat.node_tree.links.new(bsdf.inputs['Metallic'], mul_node.outputs[0])
+                else:
+                    bmat.node_tree.links.new(bsdf.inputs['Metallic'], sep_node.outputs['B'])
+
+                if bmat.roughness is not None and bmat.roughness != 1.0:
+                    mul_node = bmat.node_tree.nodes.new("ShaderNodeMath")
+                    mul_node.operation = 'MULTIPLY'
+                    mul_node.inputs[1].default_value = bmat.roughness
+                    bmat.node_tree.links.new(mul_node.inputs[0], sep_node.outputs['G'])
+                    bmat.node_tree.links.new(bsdf.inputs['Roughness'], mul_node.outputs[0])
+                else:
+                    bmat.node_tree.links.new(bsdf.inputs['Roughness'], sep_node.outputs['G'])
 
         # Assign each node to a column.  The method below ensures that
         # connections always flow from left to right, never right to left.
