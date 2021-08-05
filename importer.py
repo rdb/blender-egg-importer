@@ -1580,6 +1580,9 @@ class EggGroup(EggGroupNode):
                 for name, value in self.properties.items():
                     bpy.ops.object.game_property_new(type='STRING', name=name)
                     object.game.properties[name].value = value
+            else:
+                for name, value in self.properties.items():
+                    object[name] = value
 
             if self.shape_keys:
                 # Add the basis key first.
