@@ -18,9 +18,11 @@ if "loaded" in locals():
     import imp
     imp.reload(eggparser)
     imp.reload(importer)
+    imp.reload(compatiblity)
 else:
     from . import eggparser
     from . import importer
+    from . import compatiblity
 
 loaded = True
 
@@ -29,7 +31,7 @@ import bpy.types
 from bpy import props
 from bpy_extras.io_utils import ImportHelper
 
-
+@compatiblity.make_annotations
 class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     """Import .egg Operator"""
     bl_idname = "import_scene.egg"
@@ -39,23 +41,13 @@ class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
 
     filename_ext = ".egg"
 
-    if bpy.app.version >= (2, 93): 
-        # In blender 2.93+ properties must be annotations
-        filter_glob: props.StringProperty(default="*.egg;*.egg.pz;*.egg.gz", options={'HIDDEN'})
+    filter_glob = props.StringProperty(default="*.egg;*.egg.pz;*.egg.gz", options={'HIDDEN'})
 
-        directory: props.StringProperty(name="Directory", options={'HIDDEN'})
-        files: props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
+    directory = props.StringProperty(name="Directory", options={'HIDDEN'})
+    files = props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
 
-        load_external: props.BoolProperty(name="Load external references", description="Loads other .egg files referenced by this file as separate scenes, and instantiates them using DupliGroups.")
-        auto_bind: props.BoolProperty(name="Auto bind", default=True, description="Automatically tries to bind actions to armatures.")
-    else:
-        filter_glob = props.StringProperty(default="*.egg;*.egg.pz;*.egg.gz", options={'HIDDEN'})
-
-        directory = props.StringProperty(name="Directory", options={'HIDDEN'})
-        files = props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
-
-        load_external = props.BoolProperty(name="Load external references", description="Loads other .egg files referenced by this file as separate scenes, and instantiates them using DupliGroups.")
-        auto_bind = props.BoolProperty(name="Auto bind", default=True, description="Automatically tries to bind actions to armatures.")
+    load_external = props.BoolProperty(name="Load external references", description="Loads other .egg files referenced by this file as separate scenes, and instantiates them using DupliGroups.")
+    auto_bind = props.BoolProperty(name="Auto bind", default=True, description="Automatically tries to bind actions to armatures.")
 
     def execute(self, context):
         context = importer.EggContext()

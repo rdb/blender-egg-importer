@@ -1164,10 +1164,18 @@ class EggSwitchNode(EggNode):
             self.vertex = child.vertex
 
     def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
+        name = 'SWITCHCONDITION_DISTANCE'
         if self.fade:
-            parent['SWITCHCONDITION_DISTANCE'] = f'{self.distance}, {self.fade}, {self.vertex}'
+            value = '{0}, {1}, {2}'.format(str(self.distance), str(self.fade), str(self.vertex))
         else:
-            parent['SWITCHCONDITION_DISTANCE'] = f'{self.distance}, {self.vertex}'
+            value = '{0}, {1}'.format(str(self.distance), str(self.vertex))
+
+        if bpy.app.version >= (2, 93):
+            parent[name] = value
+        else:
+            bpy.context.scene.objects.active = parent
+            bpy.ops.object.game_property_new(type='STRING', name=name)
+            parent.game.properties[name].value = value
 
 
 class EggGroupNode(EggNode):
