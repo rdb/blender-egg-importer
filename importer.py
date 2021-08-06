@@ -413,6 +413,10 @@ class EggMaterial:
         if key in self.materials:
             return self.materials[key]
 
+        # Use first texture name if we have a texture and material name is default
+        if textures[0] and self.name.startswith('default'):
+            self.name = textures[0].name
+
         bmat = bpy.data.materials.new(self.name)
         bmat.specular_intensity = 1.0
 
@@ -783,6 +787,7 @@ class EggTexture:
     def __init__(self, name, image):
         self.texture = bpy.data.textures.new(name, 'IMAGE')
         self.texture.image = image
+        self.name = name
         self.format = None
         self.envtype = 'modulate'
         self.uv_name = None
