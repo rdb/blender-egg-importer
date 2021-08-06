@@ -1330,7 +1330,7 @@ class EggGroup(EggGroupNode):
         if type in ('SCALAR', 'CHAR*'):
             name = name.lower().replace('_', '-')
 
-            if name in ('collide-mask', 'from-collide-mask', 'into-collide-mask', 'bin', 'draw-order', 'scroll_u', 'scroll_v', 'alpha'):
+            if name in ('collide-mask', 'from-collide-mask', 'into-collide-mask', 'bin', 'draw-order', 'scroll-u', 'scroll-v', 'alpha'):
                 # YABEE recognizes these scalars as game properties.
                 self.properties[name] = values[0]
             elif name == 'blend':
