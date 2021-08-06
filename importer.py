@@ -414,7 +414,7 @@ class EggMaterial:
             return self.materials[key]
 
         # Use first texture name if we have a texture and material name is default
-        if textures[0] and self.name.startswith('default'):
+        if textures and self.name.startswith('default'):
             self.name = textures[0].name
 
         bmat = bpy.data.materials.new(self.name)
@@ -1118,6 +1118,58 @@ class EggNode:
     pass
 
 
+class EggDistanceNode(EggNode):
+
+    default_vertex = EggVertex((0, 0, 0))
+
+    def __init__(self):
+        self.vertex = EggDistanceNode.default_vertex
+
+    def begin_child(self, context, type, name, values):
+        type = type.upper()
+        if type != 'VERTEX':
+            assert False
+
+        return EggVertex(tuple(parse_number(v) for v in values))
+
+    def end_child(self, context, type, name, child):
+        self.vertex = child.pos
+
+    def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
+        parent.vertex = self.vertex
+
+
+class EggSwitchNode(EggNode):
+
+    default_vertex = EggVertex((0, 0, 0))
+
+    def __init__(self):
+        self.vertex = EggSwitchNode.default_vertex
+        self.fade = False
+        self.distance = ()
+
+    def begin_child(self, context, type, name, values):
+        type = type.upper()
+
+        if type == 'DISTANCE':
+            self.distance = tuple(parse_number(v) for v in values[:2])
+            
+            if len(values) == 3: # eggs do not support fade yet but it is in manual
+                self.fade = bool(values[2])
+
+            return EggDistanceNode()
+
+    def end_child(self, context, type, name, child):
+        if isinstance(child, EggDistanceNode):
+            self.vertex = child.vertex
+
+    def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
+        if self.fade:
+            parent['SWITCHCONDITION_DISTANCE'] = f'{self.distance}, {self.fade}, {self.vertex}'
+        else:
+            parent['SWITCHCONDITION_DISTANCE'] = f'{self.distance}, {self.vertex}'
+
+
 class EggGroupNode(EggNode):
     def __init__(self):
         self.children = []
@@ -1260,10 +1312,17 @@ class EggGroup(EggGroupNode):
 
         #if type in ('SCALAR', 'CHAR*', 'BILLBOARD', 'DCS', 'DART', 'SWITCH', 'OBJECTTYPE', 'TAG', 'MODEL', 'TEXLIST', 'REF'):
 
+        if type in ('SWITCHCONDITION', 'SWITCH'):
+            return EggSwitchNode()
+
+        if type in ('DCS'):
+            # DCS tags won't have a name
+            self.properties[type] = values[0]
+
         if type in ('SCALAR', 'CHAR*'):
             name = name.lower().replace('_', '-')
 
-            if name in ('collide-mask', 'from-collide-mask', 'into-collide-mask', 'bin', 'draw-order'):
+            if name in ('collide-mask', 'from-collide-mask', 'into-collide-mask', 'bin', 'draw-order', 'scroll_u', 'scroll_v', 'alpha'):
                 # YABEE recognizes these scalars as game properties.
                 self.properties[name] = values[0]
             elif name == 'blend':
