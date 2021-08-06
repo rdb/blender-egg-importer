@@ -1133,7 +1133,7 @@ class EggDistanceNode(EggNode):
         return EggVertex(tuple(parse_number(v) for v in values))
 
     def end_child(self, context, type, name, child):
-        self.vertex = child.pos
+        self.vertex = child
 
     def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
         parent.vertex = self.vertex
@@ -1166,9 +1166,9 @@ class EggSwitchNode(EggNode):
     def build_tree(self, context, parent=None, inv_matrix=None, under_dart=False):
         name = 'SWITCHCONDITION_DISTANCE'
         if self.fade:
-            value = '{0}, {1}, {2}'.format(str(self.distance), str(self.fade), str(self.vertex))
+            value = '{0}, {1}, {2}'.format(str(self.distance), str(self.fade), str(self.vertex.pos))
         else:
-            value = '{0}, {1}'.format(str(self.distance), str(self.vertex))
+            value = '{0}, {1}'.format(str(self.distance), str(self.vertex.pos))
 
         if bpy.app.version >= (2, 93):
             parent[name] = value
