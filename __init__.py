@@ -18,9 +18,11 @@ if "loaded" in locals():
     import imp
     imp.reload(eggparser)
     imp.reload(importer)
+    imp.reload(compatiblity)
 else:
     from . import eggparser
     from . import importer
+    from . import compatiblity
 
 loaded = True
 
@@ -29,7 +31,7 @@ import bpy.types
 from bpy import props
 from bpy_extras.io_utils import ImportHelper
 
-
+@compatiblity.make_annotations
 class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     """Import .egg Operator"""
     bl_idname = "import_scene.egg"
