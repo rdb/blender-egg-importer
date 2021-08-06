@@ -95,9 +95,9 @@ Supported features:
 - Materials
 - Textures
 - Multitexture modes (modulate, add, decal, blend, normal, glow, gloss, etc.)
-- Tags (as game properties)
-- Collide and ObjectType (as game properties)
-- Collision masks (as game properties)
+- Tags (as game or object properties)
+- Collide and ObjectType (as game or object properties)
+- Collision masks (as game or object properties)
 - Coordinate system conversion
 - Multiple UV coordinate sets
 - Armatures, skinning
@@ -105,12 +105,12 @@ Supported features:
 - Bone animations
 - Morph targets
 - YABEE/flt2egg-style external references ('file' game property)
+- Level of detail (as game or object properties)
 
 Yet to do:
 - Improve performance of parser
 - Lines, patches
 - NURBS surfaces and curves
-- Level of detail
 - Support recursive external references
 - Translate texture combine modes to material nodes
 
@@ -122,6 +122,9 @@ bones may look wrong.  This should not negatively affect skinning, however.
 
 Shear animations are not supported at present.  If you have a file that
 contains shear animations, please send it to me.
+
+Blender has removed game properties as of 2.8. As a replacement this importer
+will use object custom properties, however these are much more restrictive.
 
 If you find any bugs, please open a bug report on the issue tracker, and
 include the egg file that loaded incorrectly.
