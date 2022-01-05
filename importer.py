@@ -1145,7 +1145,7 @@ class EggSwitchNode(EggNode):
 
     def __init__(self):
         self.vertex = EggSwitchNode.default_vertex
-        self.fade = False
+        self.fade = 0.0
         self.distance = ()
 
     def begin_child(self, context, type, name, values):
@@ -1154,8 +1154,10 @@ class EggSwitchNode(EggNode):
         if type == 'DISTANCE':
             self.distance = tuple(parse_number(v) for v in values[:2])
             
-            if len(values) == 3: # eggs do not support fade yet but it is in manual
-                self.fade = bool(values[2])
+            # According to https://github.com/panda3d/panda3d/blob/c980643/panda/src/doc/eggSyntax.txt#L1468
+            # fade is presently ignored in eggs. But this should future proof this.
+            if len(values) == 3: 
+                self.fade = values[2]
 
             return EggDistanceNode()
 
@@ -1170,7 +1172,7 @@ class EggSwitchNode(EggNode):
         else:
             value = '{0}, {1}'.format(str(self.distance), str(self.vertex.pos))
 
-        if bpy.app.version >= (2, 93):
+        if bpy.app.version >= (2, 80):
             parent[name] = value
         else:
             bpy.context.scene.objects.active = parent
@@ -1323,7 +1325,7 @@ class EggGroup(EggGroupNode):
         if type in ('SWITCHCONDITION', 'SWITCH'):
             return EggSwitchNode()
 
-        if type in ('DCS'):
+        if type in ('DCS',):
             # DCS tags won't have a name
             self.properties[type] = values[0]
 
