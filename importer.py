@@ -413,10 +413,6 @@ class EggMaterial:
         if key in self.materials:
             return self.materials[key]
 
-        # Use first texture name if we have a texture and material name is default
-        if textures and self.name.startswith('default'):
-            self.name = textures[0].name
-
         bmat = bpy.data.materials.new(self.name)
         bmat.specular_intensity = 1.0
 
