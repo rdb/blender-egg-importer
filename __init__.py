@@ -31,6 +31,7 @@ import bpy.types
 from bpy import props
 from bpy_extras.io_utils import ImportHelper
 
+
 @compatibility.make_annotations
 class IMPORT_OT_egg(bpy.types.Operator, ImportHelper):
     """Import .egg Operator"""
