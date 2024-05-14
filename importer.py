@@ -432,8 +432,8 @@ class EggMaterial:
         else:
             bmat.roughness = sqrt(sqrt(2.0 / (self.shininess + 2.0)))
         bmat.metallic = self.metallic
-        if self.ior is not None:
-            bmat.ior = self.ior
+        #if self.ior is not None:
+        #    bmat.ior = self.ior
 
         if (group.blend_mode in ('add', 'subtract') and group.blend_operands == ['fbuffer_color', 'zero']) or \
            (group.blend_mode in ('add', 'inv_subtract') and group.blend_operands == ['zero', 'incoming_color']):
